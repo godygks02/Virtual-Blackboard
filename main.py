@@ -1,47 +1,60 @@
 import cv2
 import numpy as np
-from handTracker import HandTracker 
-from BackGroundModule import BackgroundModule 
+from handTracker import HandTracker
+from BackGroundModule import BackgroundModule
+from shape_Recog import ShapeRecognizer
+
 
 class VirtualBlackboard:
     """
     모든 레이어(배경, 드로잉, 사용자) 관리 및 합성
     """
+
     def __init__(self, cap_w, cap_h):
         # 레이어 해상도 (원본)
         self.width = cap_w
         self.height = cap_h
-        
+
         # AI 처리를 위한 저해상도
         self.PROC_WIDTH = 640
         self.PROC_HEIGHT = int(self.PROC_WIDTH * (self.height / self.width))
-        
+
         # 검은색 배경의 캔버스
-        self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8) # 검은색 캔버스
-        
+        self.canvas = np.zeros(
+            (self.height, self.width, 3), dtype=np.uint8
+        )  # 검은색 캔버스
+
         # 클래스 초기화
         self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=80)
-        self.bg_module = BackgroundModule() # ★ cvzone 모듈 로드
-        
+        self.bg_module = BackgroundModule()  # ★ cvzone 모듈 로드
+
+        # 도형 인식 모듈 추가
+        self.shape_recognizer = ShapeRecognizer(
+            history_len=500,
+            min_contour_area=500,
+        )
+
         # [Layer 1] 배경 레이어 (검은색)
         self.background = self.bg_module.create_layer1_background(
-            (self.height, self.width, 3), 
-            color=(0, 0, 0) # 검은색 칠판
+            (self.height, self.width, 3), color=(0, 0, 0)  # 검은색 칠판
         )
-        
-        self.prev_draw_pt = (-1, -1) # 선 그리기를 위한 이전 좌표
-        
+
+        self.prev_draw_pt = (-1, -1)  # 선 그리기를 위한 이전 좌표
+
+        # [새로 추가] 현재 드로잉 모드 상태
+        self.drawing_mode = "normal"  # 'normal' 또는 'shape'
+
         # 그리기/지우기 설정
-        self.draw_color = (255, 255, 255) # 흰색
+        self.draw_color = (255, 255, 255)  # 흰색
         self.draw_thickness = 8
-        self.erase_color = (0, 0, 0) # 캔버스 배경색 (검은색)
+        self.erase_color = (0, 0, 0)  # 캔버스 배경색 (검은색)
         self.erase_thickness = 100
 
     def update(self, frame):
         """
         매 프레임마다 호출되는 메인 업데이트 함수
         """
-        
+
         # (손) - 원본 고해상도 프레임으로 처리
         gesture_mode, point, debug_frame = self.hand_tracker.get_gesture(frame)
 
@@ -51,43 +64,82 @@ class VirtualBlackboard:
         # 사용자 마스크 생성
         # 성능을 위해 640p로 축소하여 AI 처리
         frame_small = cv2.resize(frame, (self.PROC_WIDTH, self.PROC_HEIGHT))
-        
+
         # AI가 640p 마스크 생성
         user_mask_small = self.bg_module.create_layer3_mask(frame_small, threshold=0.62)
-        
+
         # 마스크를 원본 해상도(1280x720)로 다시 확대
         user_mask = cv2.resize(user_mask_small, (self.width, self.height))
 
         # 최종 렌더링 (3-Layer 합성)
         output_frame = self.render(frame, self.canvas, user_mask)
-        
+
         return output_frame
 
     def update_canvas(self, mode, point):
         """
         입력(손)에 따라 드로잉 캔버스(self.canvas)를 업데이트
         """
-        if mode == 'draw':
+        # [새로 추가]
+        is_shape_recognized = False
+
+        # 1. 도형 그리기 모드('shape')일 때만 좌표를 버퍼에 추가 및 인식 시도
+        if self.drawing_mode == "shape":
+            # 'draw' 제스처일 때만 좌표 기록
+            if mode == "draw":
+                self.shape_recognizer.add_point(point)
+            # 드로잉이 끝났을 때 ('draw' -> 'move'/'none'/'erase' 전환) 도형 인식 실행
+            if self.shape_recognizer.prev_mode == "draw" and mode in (
+                "move",
+                "none",
+                "erase",
+            ):
+                # shape_recognizer는 이제 닫힘 검사 없이 무조건 도형 인식을 시도하도록 가정
+                is_shape_recognized = self.shape_recognizer.process_drawing(
+                    mode, self.canvas
+                )
+            # shape_recognizer의 내부 모드도 업데이트 (transition 감지용)
+            self.shape_recognizer.prev_mode = mode
+
+            # 2. 도형이 성공적으로 그려졌다면, 일반 선 그리기 로직 건너뛰기
+        if is_shape_recognized:
+            self.prev_draw_pt = (-1, -1)
+            return
+        if (
+            mode == "draw" and self.drawing_mode == "normal"
+        ):  # 일반 모드일 때만 일반 선 그리기
             if self.prev_draw_pt == (-1, -1):
                 self.prev_draw_pt = point
-            cv2.line(self.canvas, self.prev_draw_pt, point, self.draw_color, self.draw_thickness)
+            cv2.line(
+                self.canvas,
+                self.prev_draw_pt,
+                point,
+                self.draw_color,
+                self.draw_thickness,
+            )
             self.prev_draw_pt = point
-            
-        elif mode == 'erase':
+
+        elif mode == "erase":
             if self.prev_draw_pt == (-1, -1):
                 self.prev_draw_pt = point
-            cv2.line(self.canvas, self.prev_draw_pt, point, self.erase_color, self.erase_thickness)
+            cv2.line(
+                self.canvas,
+                self.prev_draw_pt,
+                point,
+                self.erase_color,
+                self.erase_thickness,
+            )
             self.prev_draw_pt = point
-        
-        else: # 'move' 또는 'none'
-            self.prev_draw_pt = (-1, -1) # 선 끊기
+
+        else:  # 'move' 또는 'none'
+            self.prev_draw_pt = (-1, -1)  # 선 끊기
 
     def render(self, frame, canvas, user_mask):
         """
         3-Layer 합성 로직 (검은색 캔버스 기준)
         순서: (1.배경 + 2.드로잉) -> 3.사용자
         """
-        
+
         # (Layer 1 + Layer 2)
         # 검은색 배경(Layer 1)과 검은색 캔버스(Layer 2)를 합침
         # (배경이 0, 캔버스도 0이므로 add 연산으로 그림만 합쳐짐)
@@ -96,14 +148,14 @@ class VirtualBlackboard:
         # (Layer 3)
         # 원본 프레임에서 사용자 부분만 오려내기
         user_part = cv2.bitwise_and(frame, frame, mask=user_mask)
-        
+
         # (칠판+그림)에서 사용자 아닌 배경 부분만 오려내기
         bg_mask = cv2.bitwise_not(user_mask)
         final_bg_part = cv2.bitwise_and(combined_bg, combined_bg, mask=bg_mask)
 
         # (칠판+그림 배경) + (사람)
         output = cv2.add(final_bg_part, user_part)
-        
+
         return output
 
     def clear_canvas(self):
@@ -116,6 +168,7 @@ class VirtualBlackboard:
         self.hand_tracker.close()
         self.bg_module.close()
 
+
 # 메인 함수
 def main():
     # 웹캠 연결 (고해상도)
@@ -125,14 +178,14 @@ def main():
     if not cap.isOpened():
         print("오류: 카메라를 열 수 없습니다.")
         return
-        
-    cap.set(3, CAP_WIDTH) 
+
+    cap.set(3, CAP_WIDTH)
     cap.set(4, CAP_HEIGHT)
 
     # 메인 블랙보드 객체 생성
     blackboard = VirtualBlackboard(CAP_WIDTH, CAP_HEIGHT)
-    
-    window_name = 'Virtual Blackboard (cvzone DNN)'
+
+    window_name = "Virtual Blackboard (cvzone DNN)"
     cv2.namedWindow(window_name)
 
     while True:
@@ -140,26 +193,39 @@ def main():
         if not ret:
             print("프레임을 읽어올 수 없습니다. (스트림 종료?)")
             break
-        
+
         # 좌우 반전
-        frame = cv2.flip(frame, 1) 
+        frame = cv2.flip(frame, 1)
 
         # 메인 업데이트 함수 호출
         output_image = blackboard.update(frame)
 
         cv2.imshow(window_name, output_image)
-        
+
         # 키보드 이벤트
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
+        if key == ord("q"):
             break
-        elif key == ord('c'):
+        elif key == ord("c"):
             blackboard.clear_canvas()
+        # [새로 추가] 's' 키로 도형 모드 전환
+        elif key == ord("s"):
+            if blackboard.drawing_mode == "normal":
+                blackboard.drawing_mode = "shape"
+                print("도형 그리기 모드 활성화 (Shape Mode ON)")
+            else:
+                blackboard.drawing_mode = "normal"
+                print("일반 그리기 모드 활성화 (Normal Mode ON)")
 
+            # 모드 전환 시 이전 획이 보정되는 것을 방지하기 위해 버퍼와 이전 좌표 초기화
+            blackboard.shape_recognizer.current_drawing_pts.clear()
+            blackboard.prev_draw_pt = (-1, -1)
+            blackboard.shape_recognizer.prev_mode = "none"
     # 리소스 해제
     blackboard.close()
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
