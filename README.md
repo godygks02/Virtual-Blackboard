@@ -62,6 +62,9 @@ pip install cvzone==1.5.6
 
 ## 실행 및 사용법
 
+프로젝트 실행 전 터미널에서
+pip install -r requirements.txt 실행
+
 프로젝트를 실행하려면 터미널에서 main.py를 직접 실행
 ```bash
 python main.py
