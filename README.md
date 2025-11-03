@@ -15,7 +15,7 @@ git clone https://github.com/godygks02/Virtual-Blackboard
 libraries
 
 ```bash
-pip install -r requirements.txt --upgrade --no-deps
+pip install -r requirements.txt
 ```
 모듈 다운로드
 
