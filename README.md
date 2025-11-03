@@ -5,17 +5,20 @@
 
 ##  Setup
 
+Download
+
+```bash
+git clone https://github.com/godygks02/Virtual-Blackboard
+```
+레포지토리 다운로드 후 
+
 libraries
 
 ```bash
-# 1. OpenCV, MediaPipe
-pip install opencv-python
-pip install mediapipe
-
-# 2. 배경 제거 모듈 (BackGroundModule.py)을 위한 필수 라이브러리
-# cvzone은 1.5.6 버전을 사용
-pip install cvzone==1.5.6
+pip install -r requirements.txt --upgrade --no-deps
 ```
+모듈 다운로드
+
 ---
 
 ## Module Descriptions

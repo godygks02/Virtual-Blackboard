@@ -2,15 +2,19 @@ import cv2
 import numpy as np
 from handTracker import HandTracker 
 from BackGroundModule import BackgroundModule 
+from BackGroundManager import BackgroundManager
+
+from utils import file_select_dialog
 
 class VirtualBlackboard:
     """
     모든 레이어(배경, 드로잉, 사용자) 관리 및 합성
     """
-    def __init__(self, cap_w, cap_h):
+    def __init__(self, cap_w, cap_h, background_path=None):
         # 레이어 해상도 (원본)
         self.width = cap_w
         self.height = cap_h
+        self.background_path = background_path
         
         # AI 처리를 위한 저해상도
         self.PROC_WIDTH = 640
@@ -22,6 +26,7 @@ class VirtualBlackboard:
         # 클래스 초기화
         self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=80)
         self.bg_module = BackgroundModule() # ★ cvzone 모듈 로드
+        self.bg_manager = BackgroundManager(self.width, self.height)
         
         # [Layer 1] 배경 레이어 (검은색)
         self.background = self.bg_module.create_layer1_background(
@@ -36,6 +41,11 @@ class VirtualBlackboard:
         self.draw_thickness = 8
         self.erase_color = (0, 0, 0) # 캔버스 배경색 (검은색)
         self.erase_thickness = 100
+
+    def add_back_ground(self, source=None, color=(0,0,0)):
+        self.background_path = source
+        self.bg_manager.add_background(source=source, color=color)
+
 
     def update(self, frame):
         """
@@ -91,7 +101,8 @@ class VirtualBlackboard:
         # (Layer 1 + Layer 2)
         # 검은색 배경(Layer 1)과 검은색 캔버스(Layer 2)를 합침
         # (배경이 0, 캔버스도 0이므로 add 연산으로 그림만 합쳐짐)
-        combined_bg = cv2.add(self.background, canvas)
+        bg_view = self.bg_manager.get_view() if self.background_path is not None else self.canvas
+        combined_bg = cv2.add(bg_view, canvas)
 
         # (Layer 3)
         # 원본 프레임에서 사용자 부분만 오려내기
@@ -120,6 +131,7 @@ class VirtualBlackboard:
 def main():
     # 웹캠 연결 (고해상도)
     CAP_WIDTH, CAP_HEIGHT = 1280, 720
+    bg_file_path = None
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
@@ -131,9 +143,11 @@ def main():
 
     # 메인 블랙보드 객체 생성
     blackboard = VirtualBlackboard(CAP_WIDTH, CAP_HEIGHT)
-    
+    blackboard.add_back_ground(bg_file_path)
+
     window_name = 'Virtual Blackboard (cvzone DNN)'
     cv2.namedWindow(window_name)
+    cv2.setMouseCallback(window_name, blackboard.bg_manager.on_mouse)
 
     while True:
         ret, frame = cap.read()
@@ -148,13 +162,30 @@ def main():
         output_image = blackboard.update(frame)
 
         cv2.imshow(window_name, output_image)
+        LEFT, UP, RIGHT, DOWN = 2424832, 2490368, 2555904, 2621440
         
         # 키보드 이벤트
-        key = cv2.waitKey(1) & 0xFF
+        key = cv2.waitKeyEx(1)
         if key == ord('q'):
             break
         elif key == ord('c'):
             blackboard.clear_canvas()
+        elif key in (81, LEFT, ord('a')):
+            blackboard.bg_manager.prev_page()
+            print("[DEBUG] MOVE PREV PAGE")
+        elif key in (83, RIGHT, ord('d')):
+            blackboard.bg_manager.next_page()
+            print("[DEBUG] MOVE NEXT PAGE")
+        elif key == ord('f'):
+            selected_file_path = file_select_dialog()
+            if selected_file_path != '':
+                bg_file_path = selected_file_path 
+                blackboard.add_back_ground(bg_file_path)
+            
+        elif key in (82, UP):       # ↑ 줌 인
+            blackboard.bg_manager.zoom = min(blackboard.bg_manager.zoom * 1.1, 5.0)
+        elif key in (84, DOWN):     # ↓ 줌 아웃
+            blackboard.bg_manager.zoom = max(blackboard.bg_manager.zoom * 0.9, 0.3)
 
     # 리소스 해제
     blackboard.close()
