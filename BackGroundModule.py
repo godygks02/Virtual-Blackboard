@@ -21,27 +21,29 @@ class BackgroundModule:
 
     def create_layer3_mask(self, frame, threshold=0.62):
         """
-        (Layer 3) DNN을 사용해 '사람' 마스크를 생성
-
-        cvzone의 removeBG 함수 로직을 재구성하여 '마스크'만 반환합니다.
+        입력 프레임(BGR)에서 사람(전경) 마스크를 생성하여
+        8-bit 단일채널(0/255) C-연속 메모리로 반환.
         """
-
-        # AI 모델 실행 (MediaPipe의 원본 mask를 얻기 위함)
+        # MediaPipe는 RGB 입력 기대
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
         results = self.segmentor.selfieSegmentation.process(img_rgb)
 
+        # 세그멘테이션 결과 없으면 바로 0 마스크 반환
         if results.segmentation_mask is None:
-            # 사람이 감지되지 않으면 빈 마스크 반환
-            return np.zeros((frame.shape[0], frame.shape[1]), dtype=np.uint8)
+            h, w = frame.shape[:2]
+            return np.zeros((h, w), dtype=np.uint8)
 
-        # 마스크 결과(float 0.0 ~ 1.0)를 흑백(0/255)으로 변환
+        # float(0~1) → 이진(0/255)
         mask_float = results.segmentation_mask
-
-        # 사용자가 제공한 오픈소스 코드의 임계값(0.62) 사용
         user_mask = (mask_float > threshold).astype(np.uint8) * 255
 
+        # 단일채널/연속성/dtype 보장
+        if user_mask.ndim == 3:
+            user_mask = cv2.cvtColor(user_mask, cv2.COLOR_BGR2GRAY)
+        user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
+
         return user_mask
+
 
     def close(self):
         """리소스 해제"""

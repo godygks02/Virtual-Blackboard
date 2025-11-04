@@ -9,6 +9,8 @@ from handTracker import HandTracker
 from BackGroundModule import BackgroundModule
 from shape_Recog import ShapeRecognizer
 
+from keyboard_input import KeyboardInputManager   
+from overlay_hud import draw_hud                    
 
 class VirtualBlackboard:
     """
@@ -80,8 +82,13 @@ class VirtualBlackboard:
         # AI가 640p 마스크 생성
         user_mask_small = self.bg_module.create_layer3_mask(frame_small, threshold=0.62)
 
-        # 마스크를 원본 해상도(1280x720)로 다시 확대
-        user_mask = cv2.resize(user_mask_small, (self.width, self.height))
+        # 마스크를 원본 해상도(1280x720)로 다시 확대  +  형태 보장
+        user_mask = cv2.resize(
+            user_mask_small, (self.width, self.height), interpolation=cv2.INTER_NEAREST
+        )
+        if user_mask.ndim == 3:  # 혹시 3채널로 들어오면 단일채널로
+            user_mask = cv2.cvtColor(user_mask, cv2.COLOR_BGR2GRAY)
+        user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
 
         # 최종 렌더링 (3-Layer 합성)
         output_frame = self.render(frame, self.canvas, user_mask)
@@ -151,6 +158,8 @@ class VirtualBlackboard:
         3-Layer 합성 로직 (검은색 캔버스 기준)
         순서: (1.배경 + 2.드로잉) -> 3.사용자
         """
+        # bitwise 사용 전 안전장치
+        user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
 
         # (Layer 1 + Layer 2)
         # 검은색 배경(Layer 1)과 검은색 캔버스(Layer 2)를 합침
@@ -200,6 +209,9 @@ def main():
     blackboard = VirtualBlackboard(CAP_WIDTH, CAP_HEIGHT)
 
     blackboard.add_back_ground(bg_file_path)
+    
+    # 키보드 매니저
+    kb = KeyboardInputManager()
 
     window_name = 'Virtual Blackboard (cvzone DNN)'
     cv2.namedWindow(window_name)
@@ -214,14 +226,30 @@ def main():
         # 좌우 반전
         frame = cv2.flip(frame, 1)
 
-        # 메인 업데이트 함수 호출
+        # 프레임을 블랙보드 해상도에 강제 맞춤 (크기 불일치 방지)
+        frame = cv2.resize(frame, (blackboard.width, blackboard.height))
+
+        # 메인 업데이트 함수 호출 (가상 칠판 3-Layer 합성)
         output_image = blackboard.update(frame)
 
+        # HUD 오버레이 (현재 모드/색상/굵기/줌/페이지/REC 상태 표시)
+        output_image = draw_hud(output_image, blackboard, kb)
+
+        # 화면 출력
         cv2.imshow(window_name, output_image)
+
+        # 키보드 이벤트 (특수키 코드 상수)
         LEFT, UP, RIGHT, DOWN = 2424832, 2490368, 2555904, 2621440
-        
-        # 키보드 이벤트
         key = cv2.waitKeyEx(1)
+
+        # 키보드 매니저에 먼저 전달 (추가 기능: 색/굵기/녹화/스냅샷/도움말)
+        #  - 스냅샷(P)은 HUD 포함된 최종 화면을 저장
+        kb.handle_key(key, blackboard, current_frame_for_snapshot=output_image)
+
+        # 매니저 상태를 블랙보드에 반영 (펜 색상/굵기 등)
+        kb.apply_to_blackboard(blackboard)
+
+        # ===== 기존 단축키 로직 유지 =====
         if key == ord('q'):
             break
         elif key == ord("c"):
@@ -235,15 +263,16 @@ def main():
         elif key == ord('f'):
             selected_file_path = file_select_dialog()
             if selected_file_path != '':
-                bg_file_path = selected_file_path 
+                bg_file_path = selected_file_path
                 blackboard.add_back_ground(bg_file_path)
-            
+
+        # ↑/↓ 줌 조절 (배경 확대/축소)
         elif key in (82, UP):       # ↑ 줌 인
             blackboard.bg_manager.zoom = min(blackboard.bg_manager.zoom * 1.1, 5.0)
         elif key in (84, DOWN):     # ↓ 줌 아웃
             blackboard.bg_manager.zoom = max(blackboard.bg_manager.zoom * 0.9, 0.3)
 
-        # [새로 추가] 's' 키로 도형 모드 전환
+        # 's' 키로 도형 모드 전환 (기존 유지)
         elif key == ord("s"):
             if blackboard.drawing_mode == "normal":
                 blackboard.drawing_mode = "shape"
@@ -256,6 +285,15 @@ def main():
             blackboard.shape_recognizer.current_drawing_pts.clear()
             blackboard.prev_draw_pt = (-1, -1)
             blackboard.shape_recognizer.prev_mode = "none"
+
+        # 녹화 중이면 현재 프레임 기록 (렌더 → HUD 이후 저장)
+        kb.after_render(output_image)
+
+    # 리소스 해제
+    blackboard.close()
+    cap.release()
+    cv2.destroyAllWindows()
+
     # 리소스 해제
     blackboard.close()
     cap.release()
