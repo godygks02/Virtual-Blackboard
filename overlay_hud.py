@@ -26,7 +26,14 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
     color = kb_manager.pen_color
     thick = kb_manager.thickness
     zoom = getattr(blackboard.bg_manager, "zoom", 1.0)
-    page = getattr(blackboard.bg_manager, "current_page", 0) + 1
+
+    # PDF가 켜져 있을 때만 페이지 표시
+    if blackboard.bg_manager.doc:
+        total_pages = len(blackboard.bg_manager.doc)
+        page = blackboard.bg_manager.page_index + 1
+    else:
+        total_pages = 1
+        page = 0  # PDF가 꺼졌을 때는 0/1로 표시
 
     # ===== 문자열 폭 측정해 오른쪽 열 x좌표를 동적으로 산정 =====
     # Row1: "Mode: ..." | "REC: ..."
@@ -41,7 +48,7 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
 
     # Row2: "Pen: (..).. Thick: .." | "Zoom: .. Page: .."
     row2_left  = f"Pen: {color}   Thick: {thick}"
-    row2_right = f"Zoom: {zoom:.2f}   Page: {page}"
+    row2_right = f"Zoom: {zoom:.2f}   Page: {page}/{total_pages}"
     (left_w2, _), _ = cv2.getTextSize(row2_left, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     y2 = 80
     _draw_text(img, row2_left, (x_left, y2))

@@ -10,7 +10,9 @@ from BackGroundModule import BackgroundModule
 from shape_Recog import ShapeRecognizer
 
 from keyboard_input import KeyboardInputManager   
-from overlay_hud import draw_hud                    
+from overlay_hud import draw_hud    
+
+from view_manager import ViewManager
 
 class VirtualBlackboard:
     """
@@ -59,6 +61,15 @@ class VirtualBlackboard:
         self.erase_color = (0, 0, 0)  # 캔버스 배경색 (검은색)
         self.erase_thickness = 100
 
+        # 페이지별 캔버스 관리
+        self.page_canvases = {}
+        self.current_page_index = 0
+        self.page_canvases[self.current_page_index] = self.canvas
+
+        # PIP용 레이어 저장용
+        self.last_combined_bg = None   # 배경 + 캔버스 (사람 없는 칠판)
+        self.last_frame = None         # 원본 카메라 프레임
+
     def add_back_ground(self, source=None, color=(0,0,0)):
         self.background_path = source
         self.bg_manager.add_background(source=source, color=color)
@@ -68,6 +79,8 @@ class VirtualBlackboard:
         """
         매 프레임마다 호출되는 메인 업데이트 함수
         """
+        # 현재 page_index와 캔버스 동기화
+        self._sync_canvas_with_page()
 
         # (손) - 원본 고해상도 프레임으로 처리
         gesture_mode, point, debug_frame = self.hand_tracker.get_gesture(frame)
@@ -178,7 +191,43 @@ class VirtualBlackboard:
         # (칠판+그림 배경) + (사람)
         output = cv2.add(final_bg_part, user_part)
 
+        # PIP용 레이어 저장
+        self.last_combined_bg = combined_bg.copy()
+        self.last_frame = frame.copy()
+
+
         return output
+    
+    def _sync_canvas_with_page(self):
+        # PDF 모드일 때만 page_index 사용, 아니면 0번 페이지로 통합
+        if self.background_path is not None and self.bg_manager.mode == "pdf":
+            page_idx = self.bg_manager.page_index
+        else:
+            page_idx = 0
+
+        if page_idx != self.current_page_index:
+            # 이전 페이지 캔버스 저장
+            self.page_canvases[self.current_page_index] = self.canvas
+
+            # 새 페이지 캔버스 불러오기 또는 생성
+            if page_idx in self.page_canvases:
+                self.canvas = self.page_canvases[page_idx]
+            else:
+                self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+                self.page_canvases[page_idx] = self.canvas
+
+            self.current_page_index = page_idx
+
+    def add_back_ground(self, source=None, color=(0,0,0)):
+        self.background_path = source
+        self.bg_manager.add_background(source=source, color=color)
+
+        # 새 배경 로딩 시 페이지별 캔버스 리셋
+        self.page_canvases = {}
+        self.current_page_index = 0
+        self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        self.page_canvases[self.current_page_index] = self.canvas
+
 
     def clear_canvas(self):
         """캔버스 검은색으로 초기화"""
@@ -213,6 +262,9 @@ def main():
     # 키보드 매니저
     kb = KeyboardInputManager()
 
+    # 보기 모드 매니저
+    view = ViewManager()
+
     window_name = 'Virtual Blackboard (cvzone DNN)'
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, blackboard.bg_manager.on_mouse)
@@ -232,11 +284,11 @@ def main():
         # 메인 업데이트 함수 호출 (가상 칠판 3-Layer 합성)
         output_image = blackboard.update(frame)
 
-        # HUD 오버레이 (현재 모드/색상/굵기/줌/페이지/REC 상태 표시)
-        output_image = draw_hud(output_image, blackboard, kb)
+        # HUD + 보기 모드
+        display_image = view.compose(output_image, blackboard, kb)
 
         # 화면 출력
-        cv2.imshow(window_name, output_image)
+        cv2.imshow(window_name, display_image)
 
         # 키보드 이벤트 (특수키 코드 상수)
         LEFT, UP, RIGHT, DOWN = 2424832, 2490368, 2555904, 2621440
@@ -244,7 +296,7 @@ def main():
 
         # 키보드 매니저에 먼저 전달 (추가 기능: 색/굵기/녹화/스냅샷/도움말)
         #  - 스냅샷(P)은 HUD 포함된 최종 화면을 저장
-        kb.handle_key(key, blackboard, current_frame_for_snapshot=output_image)
+        kb.handle_key(key, blackboard, current_frame_for_snapshot=display_image)
 
         # 매니저 상태를 블랙보드에 반영 (펜 색상/굵기 등)
         kb.apply_to_blackboard(blackboard)
@@ -286,8 +338,18 @@ def main():
             blackboard.prev_draw_pt = (-1, -1)
             blackboard.shape_recognizer.prev_mode = "none"
 
+        # 보기 모드 토글 (z키)
+        elif key == ord('z'):
+            view.toggle_mode()
+
+        elif key == ord('x'):  # 'x'로 PDF 끄기
+            blackboard.add_back_ground(None, color=(0, 0, 0))
+            print("[BG] 단색 칠판 모드로 복귀")
+
+
+
         # 녹화 중이면 현재 프레임 기록 (렌더 → HUD 이후 저장)
-        kb.after_render(output_image)
+        kb.after_render(display_image)
 
     # 리소스 해제
     blackboard.close()

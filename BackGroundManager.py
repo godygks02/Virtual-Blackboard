@@ -26,14 +26,27 @@ class BackgroundManager:
         self.drag_start = (0, 0)
         self.possible_prev_page = None
 
+        # HUD 등에 표시할 에러 메시지
+        self.last_error = ""
+
     # =======================================================
     #  배경 로딩
     # =======================================================
     def add_background(self, source=None, color=(0, 0, 0)):
+        # 이전 에러 초기화
+        self.last_error = ""
+        self.color = color
+
         if source is None:
             self.mode = "solid"
             self.background[:] = color
-            print(f"[BG] 단색({color}) 설정")
+            self.color = color
+        
+             # PDF 관련 상태 초기화
+            self.doc = None
+            self.page_index = 0
+
+            print(f"[BG] 단색({color}) 설정 및 페이지 정보 초기화")
             return
 
         ext = os.path.splitext(source)[1].lower()
@@ -45,17 +58,30 @@ class BackgroundManager:
                 self.background = cv2.cvtColor(self.background, cv2.COLOR_RGB2BGR)
                 print(f"[BG] 이미지 '{source}' 로드 완료")
             else:
-                print(f"[BG] 이미지 '{source}' 불러오기 실패")
+                msg = f"[BG] 이미지 '{source}' 불러오기 실패"
+                print(msg)
+                self.mode = "solid"
+                self.background[:] = color
+                self.last_error = msg
 
         elif ext == ".pdf":
             self.mode = "pdf"
-            self.doc = fitz.open(source)
-            self.page_index = 0
-            print(f"[BG] PDF '{source}' 로드 ({len(self.doc)}페이지)")
-            self.background = self._render_pdf_page(self.page_index)
-
+            try:
+                self.doc = fitz.open(source)
+                self.page_index = 0
+                print(f"[BG] PDF '{source}' 로드 ({len(self.doc)}페이지)")
+                self.background = self._render_pdf_page(self.page_index)
+            except Exception as e:
+                msg = f"[BG] PDF '{source}' 로드 실패: {e}"
+                print(msg)
+                self.doc = None
+                self.mode = "solid"
+                self.background[:] = color
+                self.last_error = msg
         else:
-            print(f"[BG] 지원되지 않는 파일 형식: {ext}")
+            msg = f"[BG] 지원되지 않는 파일 형식: {ext}"
+            print(msg)
+            self.last_error = msg
 
     # =======================================================
     #  PDF 렌더링
@@ -76,6 +102,14 @@ class BackgroundManager:
         self.possible_prev_page = cv2.resize(img, (self.width, self.height))
         self.possible_prev_page = cv2.cvtColor(self.possible_prev_page, cv2.COLOR_RGB2BGR)
         return self.possible_prev_page
+
+    @property
+    def current_page(self):
+        return self.page_index
+
+    @property
+    def total_pages(self):
+        return len(self.doc) if self.doc is not None else 1
 
     def next_page(self):
         if self.doc and self.page_index < len(self.doc) - 1:
