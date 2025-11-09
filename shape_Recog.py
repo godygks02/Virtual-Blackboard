@@ -32,6 +32,10 @@ class ShapeRecognizer:
         # 원 인식 임계값 (컨투어 면적 / 바운딩 사각형 면적 비율, 0.75 이상이면 원으로 판단)
         self.CIRCLE_MATCH_THRESHOLD = 0.75
 
+    # [추가] 도형색 변경 251109
+    def set_draw_color(self, color):
+        self.draw_color = color
+
     def add_point(self, point):
         """그리기 모드일 때 좌표를 버퍼에 추가"""
         if point != (-1, -1):
@@ -63,7 +67,11 @@ class ShapeRecognizer:
         # 1. 드로잉 좌표로 임시 마스크 생성 및 컨투어 찾기 (기존 로직 유지)
         pts = np.array(self.current_drawing_pts, dtype=np.int32)
         temp_mask = np.zeros_like(canvas[:, :, 0])
-        cv2.polylines(temp_mask, [pts], isClosed=False, color=255, thickness=30)
+        cv2.polylines(temp_mask, [pts], isClosed=False, color=255, thickness=40)
+
+        # 닫힘(Closing) 연산 적용
+        kernel = np.ones((5, 5), np.uint8)  # 커널 크기는 테스트하며 조정
+        temp_mask = cv2.morphologyEx(temp_mask, cv2.MORPH_CLOSE, kernel)
 
         contours, _ = cv2.findContours(
             temp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
@@ -110,7 +118,7 @@ class ShapeRecognizer:
 
                 if (
                     area_ratio >= self.CIRCLE_MATCH_THRESHOLD
-                    and 0.8 <= aspect_ratio <= 1.2
+                    and 0.7 <= aspect_ratio <= 1.3  # 필요시 값 수정(원 인식범위)
                 ):
                     shape_type = "circle"
                     # 원의 중심과 반지름 계산
@@ -121,29 +129,23 @@ class ShapeRecognizer:
         # 3. 보정된 도형 그리기 (지우기 포함)
         if shape_type != "unknown":
 
-            # # 1) 잔상 지우기: 도형의 바운딩 박스 영역을 지우기 색상으로 채움
-            # # (원의 경우 minEnclosingCircle의 결과를 사용하여 안전하게 지워야 함)
+            pts = np.array(self.current_drawing_pts, dtype=np.int32)
 
-            # if shape_type == "circle":
-            #     # 원의 바운딩 박스를 사용 (원의 중심과 지름 기반)
-            #     x_c, y_c = center
-            #     radius_c = radius
-            #     cv2.rectangle(
-            #         canvas,
-            #         (x_c - radius_c - 20, y_c - radius_c - 20),
-            #         (x_c + radius_c + 20, y_c + radius_c + 20),
-            #         self.erase_color,
-            #         cv2.FILLED,
-            #     )
-            # else:
-            #     # 사각형 또는 삼각형의 바운딩 박스 사용
-            #     cv2.rectangle(
-            #         canvas,
-            #         (x - 20, y - 20),
-            #         (x + w + 20, y + h + 20),
-            #         self.erase_color,
-            #         cv2.FILLED,
-            #     )
+            if len(pts) > 1:
+                # 궤적을 따라 검은색 선을 다시 그려서 지웁니다.
+                # 두께를 그렸던 두께보다 조금 더 크게 설정하여 확실히 지웁니다.
+                erase_thickness = self.draw_thickness + 10
+
+                for i in range(1, len(pts)):
+                    pt1 = tuple(pts[i - 1])
+                    pt2 = tuple(pts[i])
+                    cv2.line(
+                        canvas,
+                        pt1,
+                        pt2,
+                        self.erase_color,  # 검은색
+                        erase_thickness,
+                    )
 
             # 2) 보정된 도형 그리기
             if shape_type == "circle":

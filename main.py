@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
-from handTracker import HandTracker 
-from BackGroundModule import BackgroundModule 
+from handTracker import HandTracker
+from BackGroundModule import BackgroundModule
 from BackGroundManager import BackgroundManager
 
 from utils import file_select_dialog
@@ -9,21 +9,23 @@ from handTracker import HandTracker
 from BackGroundModule import BackgroundModule
 from shape_Recog import ShapeRecognizer
 
-from keyboard_input import KeyboardInputManager   
-from overlay_hud import draw_hud    
+from keyboard_input import KeyboardInputManager
+from overlay_hud import draw_hud
 
 from view_manager import ViewManager
+
 
 class VirtualBlackboard:
     """
     모든 레이어(배경, 드로잉, 사용자) 관리 및 합성
     """
+
     def __init__(self, cap_w, cap_h, background_path=None):
         # 레이어 해상도 (원본)
         self.width = cap_w
         self.height = cap_h
         self.background_path = background_path
-        
+
         # AI 처리를 위한 저해상도
         self.PROC_WIDTH = 640
         self.PROC_HEIGHT = int(self.PROC_WIDTH * (self.height / self.width))
@@ -35,9 +37,8 @@ class VirtualBlackboard:
 
         # 클래스 초기화
         self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=80)
-        self.bg_module = BackgroundModule() # ★ cvzone 모듈 로드
+        self.bg_module = BackgroundModule()  # ★ cvzone 모듈 로드
         self.bg_manager = BackgroundManager(self.width, self.height)
-        
 
         # 도형 인식 모듈 추가
         self.shape_recognizer = ShapeRecognizer(
@@ -67,13 +68,12 @@ class VirtualBlackboard:
         self.page_canvases[self.current_page_index] = self.canvas
 
         # PIP용 레이어 저장용
-        self.last_combined_bg = None   # 배경 + 캔버스 (사람 없는 칠판)
-        self.last_frame = None         # 원본 카메라 프레임
+        self.last_combined_bg = None  # 배경 + 캔버스 (사람 없는 칠판)
+        self.last_frame = None  # 원본 카메라 프레임
 
-    def add_back_ground(self, source=None, color=(0,0,0)):
+    def add_back_ground(self, source=None, color=(0, 0, 0)):
         self.background_path = source
         self.bg_manager.add_background(source=source, color=color)
-
 
     def update(self, frame):
         """
@@ -112,7 +112,7 @@ class VirtualBlackboard:
         """
         입력(손)에 따라 드로잉 캔버스(self.canvas)를 업데이트
         """
-        # [새로 추가]
+        # 도형 인식
         is_shape_recognized = False
 
         # 1. 도형 그리기 모드('shape')일 때만 좌표를 버퍼에 추가 및 인식 시도
@@ -137,9 +137,7 @@ class VirtualBlackboard:
         if is_shape_recognized:
             self.prev_draw_pt = (-1, -1)
             return
-        if (
-            mode == "draw" and self.drawing_mode == "normal"
-        ):  # 일반 모드일 때만 일반 선 그리기
+        if mode == "draw":  # and self.drawing_mode == "normal"
             if self.prev_draw_pt == (-1, -1):
                 self.prev_draw_pt = point
             cv2.line(
@@ -151,7 +149,7 @@ class VirtualBlackboard:
             )
             self.prev_draw_pt = point
 
-        elif mode == "erase":
+        elif mode == "erase" and self.drawing_mode != "shape":
             if self.prev_draw_pt == (-1, -1):
                 self.prev_draw_pt = point
             cv2.line(
@@ -177,7 +175,11 @@ class VirtualBlackboard:
         # (Layer 1 + Layer 2)
         # 검은색 배경(Layer 1)과 검은색 캔버스(Layer 2)를 합침
         # (배경이 0, 캔버스도 0이므로 add 연산으로 그림만 합쳐짐)
-        bg_view = self.bg_manager.get_view() if self.background_path is not None else self.canvas
+        bg_view = (
+            self.bg_manager.get_view()
+            if self.background_path is not None
+            else self.canvas
+        )
         combined_bg = cv2.add(bg_view, canvas)
 
         # (Layer 3)
@@ -195,9 +197,8 @@ class VirtualBlackboard:
         self.last_combined_bg = combined_bg.copy()
         self.last_frame = frame.copy()
 
-
         return output
-    
+
     def _sync_canvas_with_page(self):
         # PDF 모드일 때만 page_index 사용, 아니면 0번 페이지로 통합
         if self.background_path is not None and self.bg_manager.mode == "pdf":
@@ -218,7 +219,7 @@ class VirtualBlackboard:
 
             self.current_page_index = page_idx
 
-    def add_back_ground(self, source=None, color=(0,0,0)):
+    def add_back_ground(self, source=None, color=(0, 0, 0)):
         self.background_path = source
         self.bg_manager.add_background(source=source, color=color)
 
@@ -228,11 +229,15 @@ class VirtualBlackboard:
         self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         self.page_canvases[self.current_page_index] = self.canvas
 
-
     def clear_canvas(self):
         """캔버스 검은색으로 초기화"""
         self.canvas.fill(0)
         print("Canvas cleared.")
+
+    def update_shape_recognizer_color(self, color):
+        """현재 펜 색상을 도형 인식 모듈에 전달"""
+        # self.shape_recognizer는 __init__에서 초기화되었습니다.
+        self.shape_recognizer.set_draw_color(color)
 
     def close(self):
         """모든 리소스 해제"""
@@ -258,14 +263,14 @@ def main():
     blackboard = VirtualBlackboard(CAP_WIDTH, CAP_HEIGHT)
 
     blackboard.add_back_ground(bg_file_path)
-    
+
     # 키보드 매니저
     kb = KeyboardInputManager()
 
     # 보기 모드 매니저
     view = ViewManager()
 
-    window_name = 'Virtual Blackboard (cvzone DNN)'
+    window_name = "Virtual Blackboard (cvzone DNN)"
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, blackboard.bg_manager.on_mouse)
 
@@ -301,27 +306,30 @@ def main():
         # 매니저 상태를 블랙보드에 반영 (펜 색상/굵기 등)
         kb.apply_to_blackboard(blackboard)
 
+        # 도형인식에 펜 색상 업데이트
+        blackboard.update_shape_recognizer_color(blackboard.draw_color)
+
         # ===== 기존 단축키 로직 유지 =====
-        if key == ord('q'):
+        if key == ord("q"):
             break
         elif key == ord("c"):
             blackboard.clear_canvas()
-        elif key in (81, LEFT, ord('a')):
+        elif key in (81, LEFT, ord("a")):
             blackboard.bg_manager.prev_page()
             print("[DEBUG] MOVE PREV PAGE")
-        elif key in (83, RIGHT, ord('d')):
+        elif key in (83, RIGHT, ord("d")):
             blackboard.bg_manager.next_page()
             print("[DEBUG] MOVE NEXT PAGE")
-        elif key == ord('f'):
+        elif key == ord("f"):
             selected_file_path = file_select_dialog()
-            if selected_file_path != '':
+            if selected_file_path != "":
                 bg_file_path = selected_file_path
                 blackboard.add_back_ground(bg_file_path)
 
         # ↑/↓ 줌 조절 (배경 확대/축소)
-        elif key in (82, UP):       # ↑ 줌 인
+        elif key in (82, UP):  # ↑ 줌 인
             blackboard.bg_manager.zoom = min(blackboard.bg_manager.zoom * 1.1, 5.0)
-        elif key in (84, DOWN):     # ↓ 줌 아웃
+        elif key in (84, DOWN):  # ↓ 줌 아웃
             blackboard.bg_manager.zoom = max(blackboard.bg_manager.zoom * 0.9, 0.3)
 
         # 's' 키로 도형 모드 전환 (기존 유지)
@@ -339,14 +347,12 @@ def main():
             blackboard.shape_recognizer.prev_mode = "none"
 
         # 보기 모드 토글 (z키)
-        elif key == ord('z'):
+        elif key == ord("z"):
             view.toggle_mode()
 
-        elif key == ord('x'):  # 'x'로 PDF 끄기
+        elif key == ord("x"):  # 'x'로 PDF 끄기
             blackboard.add_back_ground(None, color=(0, 0, 0))
             print("[BG] 단색 칠판 모드로 복귀")
-
-
 
         # 녹화 중이면 현재 프레임 기록 (렌더 → HUD 이후 저장)
         kb.after_render(display_image)
@@ -364,4 +370,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    #TEST
+    # TEST
