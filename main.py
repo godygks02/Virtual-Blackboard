@@ -17,6 +17,7 @@ from view_manager import ViewManager
 class VirtualBlackboard:
     """
     모든 레이어(배경, 드로잉, 사용자) 관리 및 합성
+    [수정] "검은색 캔버스(0) + 컬러 잉크(1-255)" 모델 기준
     """
 
     def __init__(self, cap_w, cap_h, background_path=None):
@@ -29,13 +30,13 @@ class VirtualBlackboard:
         self.PROC_WIDTH = 640
         self.PROC_HEIGHT = int(self.PROC_WIDTH * (self.height / self.width))
 
-        # 검은색 배경의 캔버스
+        # [수정] 검은색 배경의 캔버스 (정상)
         self.canvas = np.zeros(
             (self.height, self.width, 3), dtype=np.uint8
         )  # 검은색 캔버스
 
         # 클래스 초기화
-        self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=150)
+        self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=120)
         self.bg_module = BackgroundModule()  # ★ cvzone 모듈 로드
         self.bg_manager = BackgroundManager(self.width, self.height)
 
@@ -51,14 +52,12 @@ class VirtualBlackboard:
         )
 
         self.prev_draw_pt = (-1, -1)  # 선 그리기를 위한 이전 좌표
-
-        # [새로 추가] 현재 드로잉 모드 상태
         self.drawing_mode = "normal"  # 'normal' 또는 'shape'
 
-        # 그리기/지우기 설정
-        self.draw_color = (255, 255, 255)  # 흰색
+        # [수정] 그리기/지우기 설정 (검은색 캔버스 기준)
+        self.draw_color = (255, 255, 255)  # 잉크: 흰색 (기본값)
         self.draw_thickness = 8
-        self.erase_color = (0, 0, 0)  # 캔버스 배경색 (검은색)
+        self.erase_color = (0, 0, 0)  # 지우개: 검은색 (캔버스 배경색)
         self.erase_thickness = 100
 
         # 페이지별 캔버스 관리
@@ -67,61 +66,62 @@ class VirtualBlackboard:
         self.page_canvases[self.current_page_index] = self.canvas
 
         # PIP용 레이어 저장용
-        self.last_combined_bg = None  # 배경 + 캔버스 (사람 없는 칠판)
-        self.last_frame = None  # 원본 카메라 프레임
+        self.last_combined_bg = None
+        self.last_frame = None
 
     def add_back_ground(self, source=None, color=(0, 0, 0)):
         self.background_path = source
         self.bg_manager.add_background(source=source, color=color)
 
+        # 새 배경 로딩 시 페이지별 캔버스 리셋
+        self.page_canvases = {}
+        self.current_page_index = 0
+        
+        # [수정] 기본 캔버스를 '검은색'으로 생성 (np.ones -> np.zeros)
+        self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        self.page_canvases[self.current_page_index] = self.canvas
+
     def update(self, frame, drawing_enabled, user_mask_enabled):
         """
         매 프레임마다 호출되는 메인 업데이트 함수
         """
-        # 현재 page_index와 캔버스 동기화
         self._sync_canvas_with_page()
 
-        # (손) - [수정] drawing_enabled 플래그에 따라 조건부 실행
+        # [수정] 't'키 오류 방지: gesture_mode, point 기본값 설정
+        gesture_mode = 'none'
+        point = (-1, -1)
+        # debug_frame = frame # (필요 시)
+
         if drawing_enabled:
             gesture_mode, point, debug_frame = self.hand_tracker.get_gesture(frame)
-            # (드로잉) - 원본 해상도 캔버스에 그림
             self.update_canvas(gesture_mode, point)
         else:
-            # 손 추적 OFF: 강제로 'move' 모드를 주입하여 선이 끊어지게 함
             self.update_canvas('move', (-1, -1))
-        
+
         # 사용자 마스크 생성
-        # 성능을 위해 640p로 축소하여 AI 처리
-        # 사용자 마스크 생성 - [수정] user_mask_enabled 플래그에 따라 조건부 실행
         if user_mask_enabled:
-            # 성능을 위해 640p로 축소하여 AI 처리
             frame_small = cv2.resize(frame, (self.PROC_WIDTH, self.PROC_HEIGHT))
-
-            # AI가 640p 마스크 생성
             user_mask_small = self.bg_module.create_layer3_mask(frame_small, threshold=0.62)
-
-            # 마스크를 원본 해상도(1280x720)로 다시 확대  +  형태 보장
             user_mask = cv2.resize(
                 user_mask_small, (self.width, self.height), interpolation=cv2.INTER_NEAREST
             )
-            if user_mask.ndim == 3:  # 혹시 3채널로 들어오면 단일채널로
+            if user_mask.ndim == 3:
                 user_mask = cv2.cvtColor(user_mask, cv2.COLOR_BGR2GRAY)
             user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
-        
         else:
-            # [신규] 사용자 마스크 OFF: 0으로 채워진 빈 마스크 생성
-            # render() 함수는 이 빈 마스크를 받아 (배경+그림)만 표시하게 됩니다.
             user_mask = np.zeros((self.height, self.width), dtype=np.uint8)
-        
-        # 최종 렌더링 (3-Layer 합성)
+
+        # 최종 렌더링
         output_frame = self.render(frame, self.canvas, user_mask)
+        
+        # [수정] 't'키 오류 방지: 디버깅 코드를 'if drawing_enabled:' 블록 안으로 이동
         if drawing_enabled:
             # 손가락 포인터 (디버깅)
-            debug_color = (255,0,255)
-            if(gesture_mode == "erase"): 
-                debug_color = (255,255,0)
+            debug_color = (255, 0, 255) # Draw (Magenta)
+            if(gesture_mode == "erase"):
+                debug_color = (255, 255, 0) # Erase (Cyan)
             elif(gesture_mode == "move"):
-                debug_color = (0,255,255)
+                debug_color = (0, 255, 255) # Move (Yellow)
             cv2.circle(output_frame, point, 12, debug_color, cv2.FILLED)
 
         return output_frame
@@ -129,33 +129,24 @@ class VirtualBlackboard:
     def update_canvas(self, mode, point):
         """
         입력(손)에 따라 드로잉 캔버스(self.canvas)를 업데이트
+        (이 함수는 "검은색 캔버스" 모델에서 이미 올바르게 작동합니다)
         """
-        # 도형 인식
         is_shape_recognized = False
 
-        # 1. 도형 그리기 모드('shape')일 때만 좌표를 버퍼에 추가 및 인식 시도
         if self.drawing_mode == "shape":
-            # 'draw' 제스처일 때만 좌표 기록
             if mode == "draw":
                 self.shape_recognizer.add_point(point)
-            # 드로잉이 끝났을 때 ('draw' -> 'move'/'none'/'erase' 전환) 도형 인식 실행
-            if self.shape_recognizer.prev_mode == "draw" and mode in (
-                "move",
-                "none",
-                "erase",
-            ):
-                # shape_recognizer는 이제 닫힘 검사 없이 무조건 도형 인식을 시도하도록 가정
+            if self.shape_recognizer.prev_mode == "draw" and mode in ("move", "none", "erase"):
                 is_shape_recognized = self.shape_recognizer.process_drawing(
                     mode, self.canvas
                 )
-            # shape_recognizer의 내부 모드도 업데이트 (transition 감지용)
             self.shape_recognizer.prev_mode = mode
 
-            # 2. 도형이 성공적으로 그려졌다면, 일반 선 그리기 로직 건너뛰기
         if is_shape_recognized:
             self.prev_draw_pt = (-1, -1)
             return
-        if mode == "draw":  # and self.drawing_mode == "normal"
+        
+        if mode == "draw":
             if self.prev_draw_pt == (-1, -1):
                 self.prev_draw_pt = point
             cv2.line(
@@ -174,69 +165,71 @@ class VirtualBlackboard:
                 self.canvas,
                 self.prev_draw_pt,
                 point,
-                self.erase_color,
+                self.erase_color,  # 0 (검은색)으로 칠함
                 self.erase_thickness,
             )
             self.prev_draw_pt = point
 
         else:  # 'move' 또는 'none'
-            self.prev_draw_pt = (-1, -1)  # 선 끊기
+            self.prev_draw_pt = (-1, -1)
 
     def render(self, frame, canvas, user_mask):
-        """
-        3-Layer 합성 로직 (수정: 그림이 최상위 3-Layer가 됨)
-        순서: (1.배경 -> 2.사용자) -> 3.드로잉
-        """
-        # bitwise 사용 전 안전장치
-        user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
+            """
+            3-Layer 합성 로직 (수정: cv2.inRange를 사용해 마스크 생성 최적화)
+            순서: (1.배경 -> 2.사용자) -> 3.드로잉
+            """
+            user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
 
-        # (Layer 1) 배경 가져오기
-        # PDF/이미지가 있으면 "줌/패닝"된 뷰를, 없으면 "단색 검은색" 뷰를 가져옴
-        bg_view = (
-            self.bg_manager.get_view()
-            if self.background_path is not None
-            else self.background # ★수정: self.canvas 대신 self.background가 맞습니다.
-        )
+            # (Layer 1) 배경 가져오기
+            bg_view = (
+                self.bg_manager.get_view()
+                if self.background_path is not None
+                else self.background
+            )
 
-        # (Layer 2) 원본 프레임(frame)에서 사용자 부분(user_part)만 오려내기
-        user_part = cv2.bitwise_and(frame, frame, mask=user_mask)
+            # (Layer 2) 사용자 오려내기
+            user_part = cv2.bitwise_and(frame, frame, mask=user_mask)
+            bg_mask = cv2.bitwise_not(user_mask)
+            final_bg_part = cv2.bitwise_and(bg_view, bg_view, mask=bg_mask)
 
-        # (Layer 1) 배경(bg_view)에서 사용자 영역을 제외한 배경 부분만 오려내기
-        bg_mask = cv2.bitwise_not(user_mask)
-        final_bg_part = cv2.bitwise_and(bg_view, bg_view, mask=bg_mask)
+            # (Layer 1 + Layer 2) 합성
+            bg_with_user = cv2.add(final_bg_part, user_part)
 
-        # (Layer 1 + Layer 2) 합성
-        # (배경 부분) + (사람 부분)
-        bg_with_user = cv2.add(final_bg_part, user_part)
+            # === [핵심 최적화] ===
+            # (Layer 3) 드로잉 캔버스 합성 (검은색 캔버스 기준)
+            
+            # 1. 캔버스의 배경(0,0,0) 부분만 마스크로 따냅니다. (cvtColor+threshold -> inRange)
+            #    이것이 '배경 마스크' (mask_bg)입니다.
+            mask_bg = cv2.inRange(canvas, (0, 0, 0), (0, 0, 0))
+            
+            # 2. 잉크 마스크 (잉크=255, 배경=0)
+            mask_ink = cv2.bitwise_not(mask_bg)
+            # =======================
 
-        # (Layer 3) 드로잉 캔버스
-        # self.canvas는 배경이 0(검은색)이고 그림(흰색 등)만 색상 값을 가집니다.
-        
-        # (최종 합성) (Layer 1+2) + (Layer 3)
-        # (배경+사람) + (드로잉 캔버스)
-        # 캔버스의 검은색(0) 영역은 (배경+사람)에 영향을 주지 않고,
-        # 캔버스의 그림(>0) 영역은 (배경+사람) 위에 덧그려집니다.
-        output = cv2.add(bg_with_user, canvas)
+            # 3. (배경+사람)에서 잉크가 그려질 부분을 0(검은색)으로 지웁니다.
+            bg_part = cv2.bitwise_and(bg_with_user, bg_with_user, mask=mask_bg)
+            
+            # 4. 캔버스에서 잉크 부분만 오려냅니다.
+            ink_part = cv2.bitwise_and(canvas, canvas, mask=mask_ink)
 
+            # 5. (구멍 뚫린 배경) + (잉크) = 최종 합성
+            output = cv2.add(bg_part, ink_part)
 
-        # --- PIP용 레이어 저장 (ViewManager가 사용할 수 있도록) ---
-        # ViewManager(z키)는 '배경+그림'과 '원본캠'을 따로 필요로 할 수 있으므로
-        # 기존 로직을 유지하여 저장합니다.
-        
-        # 1. (배경+그림) 레이어 생성 (기존 로직)
-        self.last_combined_bg = cv2.add(bg_view, canvas)
-        # 2. (원본캠) 레이어 저장
-        self.last_frame = frame.copy()
+            # --- [PIP 레이어 저장] (로직 동일하게 수정) ---
+            bg_part_pip = cv2.bitwise_and(bg_view, bg_view, mask=mask_bg)
+            ink_part_pip = cv2.bitwise_and(canvas, canvas, mask=mask_ink)
+            self.last_combined_bg = cv2.add(bg_part_pip, ink_part_pip)
+            
+            self.last_frame = frame.copy()
 
-        return output
+            return output
 
     def _sync_canvas_with_page(self):
-        # PDF 모드일 때만 page_index 사용, 아니면 0번 페이지로 통합
+        # ... (페이지 인덱스 로직 동일) ...
+        page_idx = 0
         if self.background_path is not None and self.bg_manager.mode == "pdf":
             page_idx = self.bg_manager.page_index
-        else:
-            page_idx = 0
-
+        
         if page_idx != self.current_page_index:
             # 이전 페이지 캔버스 저장
             self.page_canvases[self.current_page_index] = self.canvas
@@ -245,29 +238,19 @@ class VirtualBlackboard:
             if page_idx in self.page_canvases:
                 self.canvas = self.page_canvases[page_idx]
             else:
+                # [수정] 새 캔버스를 '검은색'으로 생성 (np.ones -> np.zeros)
                 self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
                 self.page_canvases[page_idx] = self.canvas
 
             self.current_page_index = page_idx
 
-    def add_back_ground(self, source=None, color=(0, 0, 0)):
-        self.background_path = source
-        self.bg_manager.add_background(source=source, color=color)
-
-        # 새 배경 로딩 시 페이지별 캔버스 리셋
-        self.page_canvases = {}
-        self.current_page_index = 0
-        self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
-        self.page_canvases[self.current_page_index] = self.canvas
-
     def clear_canvas(self):
-        """캔버스 검은색으로 초기화"""
-        self.canvas.fill(0)
+        """[수정] 캔버스 검은색으로 초기화"""
+        self.canvas.fill(0) # 255 대신 0으로 채우기
         print("Canvas cleared.")
 
     def update_shape_recognizer_color(self, color):
         """현재 펜 색상을 도형 인식 모듈에 전달"""
-        # self.shape_recognizer는 __init__에서 초기화되었습니다.
         self.shape_recognizer.set_draw_color(color)
 
     def close(self):

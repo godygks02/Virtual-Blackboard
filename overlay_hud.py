@@ -20,7 +20,7 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
     h, w = img.shape[:2]
 
     # 반투명 패널 
-    panel_w, panel_h = min(480, w-40), 110
+    panel_w, panel_h = min(710, w-40), 110
     overlay = img.copy()
     cv2.rectangle(overlay, (20, 20), (20+panel_w, 20+panel_h), (0,0,0), -1)
     img[:] = cv2.addWeighted(overlay, 0.35, img, 0.65, 0)
@@ -46,7 +46,7 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
     # ===== 문자열 폭 측정해 오른쪽 열 x좌표를 동적으로 산정 =====
     # Row1: "Mode: ..." | "REC: ... | TRK: ... | USR: ..."
     row1_left  = f"Mode: {mode}"
-    row1_right = f"REC: {rec}    TRK: {trk}   USR: {usr}"
+    row1_right = f"REC: {rec}  TRK: {trk}  USR: {usr}"
     (left_w1, _), _ = cv2.getTextSize(row1_left, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     gap = 20  # 좌/우 열 간격
     x_left = 30
@@ -55,8 +55,8 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
     _draw_text(img, row1_right, (x_left + left_w1 + gap, y1))  # ← 겹치지 않도록 동적 x 계산
 
     # Row2: "Pen: (..).. Thick: .." | "Zoom: .. Page: .."
-    row2_left  = f"Pen: {color}   Thick: {thick}"
-    row2_right = f"Zoom: {zoom:.2f}   Page: {page}/{total_pages}"
+    row2_left  = f"Pen: {color}  Thick: {thick}"
+    row2_right = f"Zoom: {zoom:.2f}  Page: {page}/{total_pages}"
     (left_w2, _), _ = cv2.getTextSize(row2_left, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     y2 = 80
     _draw_text(img, row2_left, (x_left, y2))
