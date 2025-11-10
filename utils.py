@@ -5,11 +5,11 @@ def file_select_dialog():
     root = tk.Tk()
     root.withdraw()
     file_path = filedialog.askopenfilename(
-        title="배경으로 사용할 PDF/이미지 선택",
+        title="Select PDF/Image for Background",
         filetypes=(
-            ("PDF 및 이미지 파일", "*.pdf *.png *.jpg *.jpeg"),
-            ("PDF 파일", "*.pdf"),
-            ("이미지 파일", "*.png *.jpg *.jpeg")
+            ("PDF and Image Files", "*.pdf *.png *.jpg *.jpeg"),
+            ("PDF Files", "*.pdf"),
+            ("Image Files", "*.png *.jpg *.jpeg")
         )
     )
 

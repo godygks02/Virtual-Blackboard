@@ -16,56 +16,56 @@ from view_manager import ViewManager
 
 class VirtualBlackboard:
     """
-    모든 레이어(배경, 드로잉, 사용자) 관리 및 합성
-    [수정] "검은색 캔버스(0) + 컬러 잉크(1-255)" 모델 기준
+    Manages and composites all layers (background, drawing, user).
+    [MODIFIED] Based on the "black canvas(0) + color ink(1-255)" model.
     """
 
     def __init__(self, cap_w, cap_h, background_path=None):
-        # 레이어 해상도 (원본)
+        # Layer resolution (original)
         self.width = cap_w
         self.height = cap_h
         self.background_path = background_path
 
-        # AI 처리를 위한 저해상도
+        # Low resolution for AI processing
         self.PROC_WIDTH = 640
         self.PROC_HEIGHT = int(self.PROC_WIDTH * (self.height / self.width))
 
-        # [수정] 검은색 배경의 캔버스 (정상)
+        # [MODIFIED] Canvas with black background (normal)
         self.canvas = np.zeros(
             (self.height, self.width, 3), dtype=np.uint8
-        )  # 검은색 캔버스
+        )  # Black canvas
 
-        # 클래스 초기화
+        # Class initialization
         self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=120)
-        self.bg_module = BackgroundModule()  # ★ cvzone 모듈 로드
+        self.bg_module = BackgroundModule()  # ★ Load cvzone module
         self.bg_manager = BackgroundManager(self.width, self.height)
 
-        # 도형 인식 모듈 추가
+        # Add shape recognition module
         self.shape_recognizer = ShapeRecognizer(
             history_len=500,
             min_contour_area=500,
         )
 
-        # [Layer 1] 배경 레이어 (검은색)
+        # [Layer 1] Background layer (black)
         self.background = self.bg_module.create_layer1_background(
-            (self.height, self.width, 3), color=(0, 0, 0)  # 검은색 칠판
+            (self.height, self.width, 3), color=(0, 0, 0)  # Black blackboard
         )
 
-        self.prev_draw_pt = (-1, -1)  # 선 그리기를 위한 이전 좌표
-        self.drawing_mode = "normal"  # 'normal' 또는 'shape'
+        self.prev_draw_pt = (-1, -1)  # Previous coordinate for drawing lines
+        self.drawing_mode = "normal"  # 'normal' or 'shape'
 
-        # [수정] 그리기/지우기 설정 (검은색 캔버스 기준)
-        self.draw_color = (255, 255, 255)  # 잉크: 흰색 (기본값)
+        # [MODIFIED] Drawing/erasing settings (based on black canvas)
+        self.draw_color = (255, 255, 255)  # Ink: white (default)
         self.draw_thickness = 8
-        self.erase_color = (0, 0, 0)  # 지우개: 검은색 (캔버스 배경색)
+        self.erase_color = (0, 0, 0)  # Eraser: black (canvas background color)
         self.erase_thickness = 100
 
-        # 페이지별 캔버스 관리
+        # Per-page canvas management
         self.page_canvases = {}
         self.current_page_index = 0
         self.page_canvases[self.current_page_index] = self.canvas
 
-        # PIP용 레이어 저장용
+        # For saving layers for PIP
         self.last_combined_bg = None
         self.last_frame = None
 
@@ -73,24 +73,24 @@ class VirtualBlackboard:
         self.background_path = source
         self.bg_manager.add_background(source=source, color=color)
 
-        # 새 배경 로딩 시 페이지별 캔버스 리셋
+        # Reset per-page canvases when a new background is loaded
         self.page_canvases = {}
         self.current_page_index = 0
         
-        # [수정] 기본 캔버스를 '검은색'으로 생성 (np.ones -> np.zeros)
+        # [MODIFIED] Create the default canvas as 'black' (np.ones -> np.zeros)
         self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         self.page_canvases[self.current_page_index] = self.canvas
 
     def update(self, frame, drawing_enabled, user_mask_enabled):
         """
-        매 프레임마다 호출되는 메인 업데이트 함수
+        Main update function called for every frame.
         """
         self._sync_canvas_with_page()
 
-        # [수정] 't'키 오류 방지: gesture_mode, point 기본값 설정
+        # [MODIFIED] Prevent 't' key error: set default values for gesture_mode, point
         gesture_mode = 'none'
         point = (-1, -1)
-        # debug_frame = frame # (필요 시)
+        # debug_frame = frame # (if needed)
 
         if drawing_enabled:
             gesture_mode, point, debug_frame = self.hand_tracker.get_gesture(frame)
@@ -98,7 +98,7 @@ class VirtualBlackboard:
         else:
             self.update_canvas('move', (-1, -1))
 
-        # 사용자 마스크 생성
+        # Create user mask
         if user_mask_enabled:
             frame_small = cv2.resize(frame, (self.PROC_WIDTH, self.PROC_HEIGHT))
             user_mask_small = self.bg_module.create_layer3_mask(frame_small, threshold=0.62)
@@ -111,12 +111,12 @@ class VirtualBlackboard:
         else:
             user_mask = np.zeros((self.height, self.width), dtype=np.uint8)
 
-        # 최종 렌더링
+        # Final rendering
         output_frame = self.render(frame, self.canvas, user_mask)
         
-        # [수정] 't'키 오류 방지: 디버깅 코드를 'if drawing_enabled:' 블록 안으로 이동
+        # [MODIFIED] Move debugging code inside 'if drawing_enabled:' block to prevent 't' key error
         if drawing_enabled:
-            # 손가락 포인터 (디버깅)
+            # Finger pointer (debugging)
             debug_color = (255, 0, 255) # Draw (Magenta)
             if(gesture_mode == "erase"):
                 debug_color = (255, 255, 0) # Erase (Cyan)
@@ -128,8 +128,8 @@ class VirtualBlackboard:
 
     def update_canvas(self, mode, point):
         """
-        입력(손)에 따라 드로잉 캔버스(self.canvas)를 업데이트
-        (이 함수는 "검은색 캔버스" 모델에서 이미 올바르게 작동합니다)
+        Updates the drawing canvas (self.canvas) based on hand input.
+        (This function already works correctly with the "black canvas" model)
         """
         is_shape_recognized = False
 
@@ -165,57 +165,57 @@ class VirtualBlackboard:
                 self.canvas,
                 self.prev_draw_pt,
                 point,
-                self.erase_color,  # 0 (검은색)으로 칠함
+                self.erase_color,  # Paints with 0 (black)
                 self.erase_thickness,
             )
             self.prev_draw_pt = point
 
-        else:  # 'move' 또는 'none'
+        else:  # 'move' or 'none'
             self.prev_draw_pt = (-1, -1)
 
     def render(self, frame, canvas, user_mask):
             """
-            3-Layer 합성 로직 (수정: cv2.inRange를 사용해 마스크 생성 최적화)
-            순서: (1.배경 -> 2.사용자) -> 3.드로잉
+            3-Layer composition logic (Modified: Optimized mask creation using cv2.inRange)
+            Order: (1.Background -> 2.User) -> 3.Drawing
             """
             user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
 
-            # (Layer 1) 배경 가져오기
+            # (Layer 1) Get background
             bg_view = (
                 self.bg_manager.get_view()
                 if self.background_path is not None
                 else self.background
             )
 
-            # (Layer 2) 사용자 오려내기
+            # (Layer 2) Cut out user
             user_part = cv2.bitwise_and(frame, frame, mask=user_mask)
             bg_mask = cv2.bitwise_not(user_mask)
             final_bg_part = cv2.bitwise_and(bg_view, bg_view, mask=bg_mask)
 
-            # (Layer 1 + Layer 2) 합성
+            # (Layer 1 + Layer 2) Composite
             bg_with_user = cv2.add(final_bg_part, user_part)
 
-            # === [핵심 최적화] ===
-            # (Layer 3) 드로잉 캔버스 합성 (검은색 캔버스 기준)
+            # === [CORE OPTIMIZATION] ===
+            # (Layer 3) Composite drawing canvas (based on black canvas)
             
-            # 1. 캔버스의 배경(0,0,0) 부분만 마스크로 따냅니다. (cvtColor+threshold -> inRange)
-            #    이것이 '배경 마스크' (mask_bg)입니다.
+            # 1. Mask out only the background part (0,0,0) of the canvas. (cvtColor+threshold -> inRange)
+            #    This is the 'background mask' (mask_bg).
             mask_bg = cv2.inRange(canvas, (0, 0, 0), (0, 0, 0))
             
-            # 2. 잉크 마스크 (잉크=255, 배경=0)
+            # 2. Ink mask (ink=255, background=0)
             mask_ink = cv2.bitwise_not(mask_bg)
             # =======================
 
-            # 3. (배경+사람)에서 잉크가 그려질 부분을 0(검은색)으로 지웁니다.
+            # 3. Black out the area where the ink will be drawn on the (background+user) image.
             bg_part = cv2.bitwise_and(bg_with_user, bg_with_user, mask=mask_bg)
             
-            # 4. 캔버스에서 잉크 부분만 오려냅니다.
+            # 4. Cut out only the ink part from the canvas.
             ink_part = cv2.bitwise_and(canvas, canvas, mask=mask_ink)
 
-            # 5. (구멍 뚫린 배경) + (잉크) = 최종 합성
+            # 5. (Punched background) + (ink) = Final composite
             output = cv2.add(bg_part, ink_part)
 
-            # --- [PIP 레이어 저장] (로직 동일하게 수정) ---
+            # --- [Save PIP Layer] (Logic modified similarly) ---
             bg_part_pip = cv2.bitwise_and(bg_view, bg_view, mask=mask_bg)
             ink_part_pip = cv2.bitwise_and(canvas, canvas, mask=mask_ink)
             self.last_combined_bg = cv2.add(bg_part_pip, ink_part_pip)
@@ -225,63 +225,63 @@ class VirtualBlackboard:
             return output
 
     def _sync_canvas_with_page(self):
-        # ... (페이지 인덱스 로직 동일) ...
+        # ... (Page index logic remains the same) ...
         page_idx = 0
         if self.background_path is not None and self.bg_manager.mode == "pdf":
             page_idx = self.bg_manager.page_index
         
         if page_idx != self.current_page_index:
-            # 이전 페이지 캔버스 저장
+            # Save the canvas of the previous page
             self.page_canvases[self.current_page_index] = self.canvas
 
-            # 새 페이지 캔버스 불러오기 또는 생성
+            # Load or create the canvas for the new page
             if page_idx in self.page_canvases:
                 self.canvas = self.page_canvases[page_idx]
             else:
-                # [수정] 새 캔버스를 '검은색'으로 생성 (np.ones -> np.zeros)
+                # [MODIFIED] Create a new canvas as 'black' (np.ones -> np.zeros)
                 self.canvas = np.zeros((self.height, self.width, 3), dtype=np.uint8)
                 self.page_canvases[page_idx] = self.canvas
 
             self.current_page_index = page_idx
 
     def clear_canvas(self):
-        """[수정] 캔버스 검은색으로 초기화"""
-        self.canvas.fill(0) # 255 대신 0으로 채우기
+        """[MODIFIED] Initialize canvas to black"""
+        self.canvas.fill(0) # Fill with 0 instead of 255
         print("Canvas cleared.")
 
     def update_shape_recognizer_color(self, color):
-        """현재 펜 색상을 도형 인식 모듈에 전달"""
+        """Pass the current pen color to the shape recognizer module"""
         self.shape_recognizer.set_draw_color(color)
 
     def close(self):
-        """모든 리소스 해제"""
+        """Release all resources"""
         self.hand_tracker.close()
         self.bg_module.close()
 
 
-# 메인 함수
+# Main function
 def main():
-    # 웹캠 연결 (고해상도)
+    # Connect to webcam (high resolution)
     CAP_WIDTH, CAP_HEIGHT = 1280, 720
     bg_file_path = None
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
-        print("오류: 카메라를 열 수 없습니다.")
+        print("Error: Could not open camera.")
         return
 
     cap.set(3, CAP_WIDTH)
     cap.set(4, CAP_HEIGHT)
 
-    # 메인 블랙보드 객체 생성
+    # Create main blackboard object
     blackboard = VirtualBlackboard(CAP_WIDTH, CAP_HEIGHT)
 
     blackboard.add_back_ground(bg_file_path)
 
-    # 키보드 매니저
+    # Keyboard manager
     kb = KeyboardInputManager()
 
-    # 보기 모드 매니저
+    # View mode manager
     view = ViewManager()
 
     window_name = "Virtual Blackboard (cvzone DNN)"
@@ -291,43 +291,43 @@ def main():
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("프레임을 읽어올 수 없습니다. (스트림 종료?)")
+            print("Could not read frame. (Stream end?)")
             break
 
-        # 좌우 반전
+        # Flip horizontally
         frame = cv2.flip(frame, 1)
 
-        # 프레임을 블랙보드 해상도에 강제 맞춤 (크기 불일치 방지)
+        # Force frame to match blackboard resolution (to prevent size mismatch)
         frame = cv2.resize(frame, (blackboard.width, blackboard.height))
 
-        # 키보드 매니저(kb)에서 현재 토글 상태 가져옴
+        # Get current toggle states from the keyboard manager (kb)
         draw_flag = kb.drawing_enabled
         mask_flag = kb.user_mask_enabled
 
-        # 메인 업데이트 함수 호출 (가상 칠판 3-Layer 합성)
-        # 읽어온 플래그를 update 함수에 전달
+        # Call the main update function (Virtual Blackboard 3-Layer composite)
+        # Pass the read flags to the update function
         output_image = blackboard.update(frame, draw_flag, mask_flag)
-        # HUD + 보기 모드
+        # HUD + View mode
         display_image = view.compose(output_image, blackboard, kb)
 
-        # 화면 출력
+        # Display output
         cv2.imshow(window_name, display_image)
 
-        # 키보드 이벤트 (특수키 코드 상수)
+        # Keyboard events (special key code constants)
         LEFT, UP, RIGHT, DOWN = 2424832, 2490368, 2555904, 2621440
         key = cv2.waitKeyEx(1)
 
-        # 키보드 매니저에 먼저 전달 (추가 기능: 색/굵기/녹화/스냅샷/도움말)
-        #  - 스냅샷(P)은 HUD 포함된 최종 화면을 저장
+        # Pass to keyboard manager first (additional features: color/thickness/record/snapshot/help)
+        #  - Snapshot (P) saves the final screen including the HUD
         kb.handle_key(key, blackboard, current_frame_for_snapshot=display_image)
 
-        # 매니저 상태를 블랙보드에 반영 (펜 색상/굵기 등)
+        # Apply manager state to the blackboard (pen color/thickness, etc.)
         kb.apply_to_blackboard(blackboard)
 
-        # 도형인식에 펜 색상 업데이트
+        # Update pen color in shape recognizer
         blackboard.update_shape_recognizer_color(blackboard.draw_color)
 
-        # ===== 기존 단축키 로직 유지 =====
+        # ===== Keep existing shortcut logic =====
         if key == ord("q"):
             break
         elif key == ord("c"):
@@ -344,38 +344,38 @@ def main():
                 bg_file_path = selected_file_path
                 blackboard.add_back_ground(bg_file_path)
 
-        # ↑/↓ 줌 조절 (배경 확대/축소)
-        elif key in (82, UP):  # ↑ 줌 인
+        # ↑/↓ Zoom control (background zoom)
+        elif key in (82, UP):  # ↑ Zoom In
             blackboard.bg_manager.zoom = min(blackboard.bg_manager.zoom * 1.1, 5.0)
-        elif key in (84, DOWN):  # ↓ 줌 아웃
+        elif key in (84, DOWN):  # ↓ Zoom Out
             blackboard.bg_manager.zoom = max(blackboard.bg_manager.zoom * 0.9, 0.3)
 
-        # 's' 키로 도형 모드 전환 (기존 유지)
+        # 's' key to toggle shape mode (keep existing)
         elif key == ord("s"):
             if blackboard.drawing_mode == "normal":
                 blackboard.drawing_mode = "shape"
-                print("도형 그리기 모드 활성화 (Shape Mode ON)")
+                print("Shape Mode ON")
             else:
                 blackboard.drawing_mode = "normal"
-                print("일반 그리기 모드 활성화 (Normal Mode ON)")
+                print("Normal Mode ON")
 
-            # 모드 전환 시 이전 획이 보정되는 것을 방지하기 위해 버퍼와 이전 좌표 초기화
+            # Clear buffer and previous point to prevent correction of the last stroke upon mode switch
             blackboard.shape_recognizer.current_drawing_pts.clear()
             blackboard.prev_draw_pt = (-1, -1)
             blackboard.shape_recognizer.prev_mode = "none"
 
-        # 보기 모드 토글 (z키)
+        # Toggle view mode (z key)
         elif key == ord("z"):
             view.toggle_mode()
 
-        elif key == ord("x"):  # 'x'로 PDF 끄기
+        elif key == ord("x"):  # 'x' to turn off PDF
             blackboard.add_back_ground(None, color=(0, 0, 0))
-            print("[BG] 단색 칠판 모드로 복귀")
+            print("[BG] Reverted to solid color blackboard mode")
 
-        # 녹화 중이면 현재 프레임 기록 (렌더 → HUD 이후 저장)
+        # If recording, record the current frame (save after render -> HUD)
         kb.after_render(display_image)
 
-    # 리소스 해제
+    # Release resources
     blackboard.close()
     cap.release()
     cv2.destroyAllWindows()

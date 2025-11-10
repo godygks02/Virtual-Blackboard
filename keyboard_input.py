@@ -6,37 +6,37 @@ import numpy as np
 
 class KeyboardInputManager:
     """
-    키보드 입력을 통해 VirtualBlackboard의 상태(모드/색상/두께) 및
-    저장/녹화/도움말 토글을 제어하는 매니저.
+    A manager that controls the state of the VirtualBlackboard (mode/color/thickness)
+    and toggles for saving/recording/help via keyboard input.
     """
     def __init__(self):
-        # 드로잉 상태(blackboard에 반영)
-        self.pen_color = (255, 255, 255)  # 기본 흰색
+        # Drawing state (reflected on the blackboard)
+        self.pen_color = (255, 255, 255)  # Default white
         self.thickness = 8
-        self.last_msg = ""                # HUD 메시지(짧은 피드백)
+        self.last_msg = ""                # HUD message (short feedback)
         
-        # 도움말/HUD 토글
+        # Help/HUD toggle
         self.help_on = False
 
-        self.hud_on = True  # '`' 키로 토글 (전체 HUD On/Off)
+        self.hud_on = True  # Toggle with '`' key (entire HUD On/Off)
 
-        # === [신규] 기능 토글 상태 ===
-        self.drawing_enabled = True     # 't' 키로 토글 (손 인식/그리기 On/Off)
-        self.user_mask_enabled = True   # 'u' 키로 토글 (사용자 마스크 On/Off)
+        # === [NEW] Feature Toggle States ===
+        self.drawing_enabled = True     # Toggle with 't' key (Hand recognition/drawing On/Off)
+        self.user_mask_enabled = True   # Toggle with 'u' key (User mask On/Off)
         # ==============================
 
-        # 녹화 상태
+        # Recording state
         self.is_recording = False
         self.writer = None
-        self.rec_fps = 30  # 필요 시 조정
+        self.rec_fps = 30  # Adjust if necessary
         self.rec_path_dir = "recordings"
         self.cap_path_dir = "captures"
         os.makedirs(self.rec_path_dir, exist_ok=True)
         os.makedirs(self.cap_path_dir, exist_ok=True)
 
-    # ---- 유틸 ----
+    # ---- Utils ----
     def _ts(self) -> str:
-        # 파일명 안전한 타임스탬프
+        # Filename-safe timestamp
         return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     def _start_recording(self, frame_w, frame_h):
@@ -58,10 +58,10 @@ class KeyboardInputManager:
         cv2.imwrite(out_path, frame_bgr)
         self.last_msg = f"[SNAP] saved to {out_path}"
 
-    # ---- 외부에서 호출 ----
+    # ---- Called from outside ----
     def after_render(self, output_image):
         """
-        렌더링 완료된 최종 프레임을 받아, 녹화 중이면 기록한다.
+        Receives the final rendered frame and records it if recording is active.
         """
         if self.is_recording and self.writer is not None:
             frame = output_image
@@ -72,20 +72,20 @@ class KeyboardInputManager:
 
     def apply_to_blackboard(self, blackboard):
         """
-        현재 매니저 상태(pen_color, thickness)를 blackboard에 반영.
+        Applies the current manager state (pen_color, thickness) to the blackboard.
         """
         blackboard.draw_color = self.pen_color
         blackboard.draw_thickness = self.thickness
 
     def handle_key(self, key, blackboard, current_frame_for_snapshot=None):
         """
-        키 입력을 받아 내부 상태를 변경하고, 필요한 경우 부수효과(녹화/스냅샷)를 수행.
+        Handles key input, changes internal state, and performs side effects (recording/snapshot) if necessary.
         """
         if key == -1:
             return
 
-        # ====== 추가 기능들 ======
-        # 펜 색상 단축키
+        # ====== Additional Features ======
+        # Pen color shortcuts
         if key == ord('w'):  # white
             self.pen_color = (255, 255, 255); self.last_msg = "Pen: WHITE"
         elif key == ord('r'):  # red
@@ -97,15 +97,15 @@ class KeyboardInputManager:
         elif key == ord('y'):  # yellow
             self.pen_color = (0, 255, 255); self.last_msg = "Pen: YELLOW"
 
-        # 펜 굵기 조절
-        elif key in (ord('+'), ord('=')):  # 키보드 레이아웃 고려하여 '='도 함께
+        # Adjust pen thickness
+        elif key in (ord('+'), ord('=')):  # Consider '=' for keyboard layout compatibility
             self.thickness = min(self.thickness + 2, 60)
             self.last_msg = f"Thickness: {self.thickness}"
         elif key in (ord('-'), ord('_')):
             self.thickness = max(self.thickness - 2, 1)
             self.last_msg = f"Thickness: {self.thickness}"
 
-        # 프리셋 1~5
+        # Presets 1-5
         elif key == ord('1'):
             self.pen_color, self.thickness = (255,255,255), 6;  self.last_msg = "Preset1: chalk"
         elif key == ord('2'):
@@ -117,25 +117,25 @@ class KeyboardInputManager:
         elif key == ord('5'):
             self.pen_color, self.thickness = (0,255,255), 18;  self.last_msg = "Preset5: highlighter"
 
-        # 녹화 토글: V
+        # Toggle recording: V
         elif key == ord('v'):
             if not self.is_recording:
                 self._start_recording(blackboard.width, blackboard.height)
             else:
                 self._stop_recording()
 
-        # 스냅샷: P
+        # Snapshot: P
         elif key == ord('p'):
             if current_frame_for_snapshot is not None:
                 self._save_snapshot(current_frame_for_snapshot)
 
-        # 도움말: H
+        # Help: H
         elif key == ord('h'):
             self.help_on = not self.help_on
             self.last_msg = "Help ON" if self.help_on else "Help OFF"
 
-        # === [신규] 기능 토글 키 ===
-        # 't' : 손 인식 (그리기/지우기) 토글
+        # === [NEW] Feature Toggle Keys ===
+        # 't' : Toggle hand recognition (drawing/erasing)
         elif key == ord('t'):
             self.drawing_enabled = not self.drawing_enabled
             if self.drawing_enabled:
@@ -143,7 +143,7 @@ class KeyboardInputManager:
             else:
                 self.last_msg = "Hand Tracking OFF"
 
-        # 'u' : 사용자 마스크 (배경제거) 토글
+        # 'u' : Toggle user mask (background removal)
         elif key == ord('u'):
             self.user_mask_enabled = not self.user_mask_enabled
             if self.user_mask_enabled:
@@ -151,13 +151,13 @@ class KeyboardInputManager:
             else:
                 self.last_msg = "User Mask OFF"
         
-        # '`' (백틱, Tab 위) : 전체 HUD 토글
+        # '`' (backtick, above Tab) : Toggle entire HUD
         elif key == ord('`'):
             self.hud_on = not self.hud_on
             self.last_msg = "HUD ON" if self.hud_on else "HUD OFF"
         # ==============================
 
-    # 간단한 도움말 문자열
+    # Simple help string
     def help_lines(self):
         return [
             "Shortcuts (KeyboardInputManager):",

@@ -9,16 +9,16 @@ class BackgroundManager:
         self.height = height
         self.dpi = dpi
 
-        # 상태 변수
+        # State variables
         self.mode = "solid"     # solid / image / pdf
         self.background = np.zeros((height, width, 3), np.uint8)
         self.color = (0, 0, 0)
 
-        # PDF 전용
+        # PDF specific
         self.doc = None
         self.page_index = 0
 
-        # 인터랙션
+        # Interaction
         self.zoom = 1.0
         self.offset_x = 0
         self.offset_y = 0
@@ -26,14 +26,14 @@ class BackgroundManager:
         self.drag_start = (0, 0)
         self.possible_prev_page = None
 
-        # HUD 등에 표시할 에러 메시지
+        # Error message to display on HUD, etc.
         self.last_error = ""
 
     # =======================================================
-    #  배경 로딩
+    #  Background Loading
     # =======================================================
     def add_background(self, source=None, color=(0, 0, 0)):
-        # 이전 에러 초기화
+        # Clear previous error
         self.last_error = ""
         self.color = color
 
@@ -42,11 +42,11 @@ class BackgroundManager:
             self.background[:] = color
             self.color = color
         
-             # PDF 관련 상태 초기화
+             # Reset PDF related states
             self.doc = None
             self.page_index = 0
 
-            print(f"[BG] 단색({color}) 설정 및 페이지 정보 초기화")
+            print(f"[BG] Solid color({color}) set and page info reset")
             return
 
         ext = os.path.splitext(source)[1].lower()
@@ -56,9 +56,9 @@ class BackgroundManager:
             if img is not None:
                 self.background = cv2.resize(img, (self.width, self.height))
                 self.background = cv2.cvtColor(self.background, cv2.COLOR_RGB2BGR)
-                print(f"[BG] 이미지 '{source}' 로드 완료")
+                print(f"[BG] Image '{source}' loaded successfully")
             else:
-                msg = f"[BG] 이미지 '{source}' 불러오기 실패"
+                msg = f"[BG] Failed to load image '{source}'"
                 print(msg)
                 self.mode = "solid"
                 self.background[:] = color
@@ -69,22 +69,22 @@ class BackgroundManager:
             try:
                 self.doc = fitz.open(source)
                 self.page_index = 0
-                print(f"[BG] PDF '{source}' 로드 ({len(self.doc)}페이지)")
+                print(f"[BG] PDF '{source}' loaded ({len(self.doc)} pages)")
                 self.background = self._render_pdf_page(self.page_index)
             except Exception as e:
-                msg = f"[BG] PDF '{source}' 로드 실패: {e}"
+                msg = f"[BG] Failed to load PDF '{source}': {e}"
                 print(msg)
                 self.doc = None
                 self.mode = "solid"
                 self.background[:] = color
                 self.last_error = msg
         else:
-            msg = f"[BG] 지원되지 않는 파일 형식: {ext}"
+            msg = f"[BG] Unsupported file format: {ext}"
             print(msg)
             self.last_error = msg
 
     # =======================================================
-    #  PDF 렌더링
+    #  PDF Rendering
     # =======================================================
     def _render_pdf_page(self, index):
         if not self.doc:
@@ -115,16 +115,16 @@ class BackgroundManager:
         if self.doc and self.page_index < len(self.doc) - 1:
             self.page_index += 1
             self.background = self._render_pdf_page(self.page_index)
-            print(f"[PDF] {self.page_index + 1}/{len(self.doc)} 페이지")
+            print(f"[PDF] Page {self.page_index + 1}/{len(self.doc)}")
 
     def prev_page(self):
         if self.doc and self.page_index > 0:
             self.page_index -= 1
             self.background = self._render_pdf_page(self.page_index)
-            print(f"[PDF] {self.page_index + 1}/{len(self.doc)} 페이지")
+            print(f"[PDF] Page {self.page_index + 1}/{len(self.doc)}")
 
     # =======================================================
-    # 줌 & 드래그
+    # Zoom & Drag
     # =======================================================
     def on_mouse(self, event, x, y, flags, param):
         if event == cv2.EVENT_MOUSEWHEEL:
@@ -145,10 +145,10 @@ class BackgroundManager:
         elif event == cv2.EVENT_LBUTTONDBLCLK:
             self.zoom = 1.0
             self.offset_x = self.offset_y = 0
-            print("[BG] 줌/위치 리셋")
+            print("[BG] Zoom/Position reset")
 
     # =======================================================
-    # 뷰 반환 (줌 + 이동 적용)
+    # Return view (zoom + pan applied)
     # =======================================================
     def get_view(self):
         img = self.background.copy()

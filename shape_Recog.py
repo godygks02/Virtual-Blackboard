@@ -1,12 +1,12 @@
 import cv2
 import numpy as np
 from collections import deque
-import math  # 원 인식을 위해 math 모듈 추가
+import math  # Add math module for circle recognition
 
 
 class ShapeRecognizer:
     """
-    손으로 그린 도형 데이터를 관리하고 닫힌 영역을 사각형, 삼각형, 원으로 변환 (보정)
+    Manages hand-drawn shape data and converts/corrects closed areas into rectangles, triangles, or circles.
     """
 
     def __init__(
@@ -24,34 +24,34 @@ class ShapeRecognizer:
         self.APPROX_EPSILON = approx_epsilon
         self.prev_mode = "none"
 
-        # 색상 및 두께
+        # Color and thickness
         self.draw_color = draw_color
         self.draw_thickness = draw_thickness
         self.erase_color = erase_color
 
-        # 원 인식 임계값 (컨투어 면적 / 바운딩 사각형 면적 비율, 0.75 이상이면 원으로 판단)
+        # Circle recognition threshold (ratio of contour area to bounding box area, if >= 0.75, it's a circle)
         self.CIRCLE_MATCH_THRESHOLD = 0.75
 
-    # [추가] 도형색 변경 251109
+    # [ADD] Change shape color 251109
     def set_draw_color(self, color):
         self.draw_color = color
 
     def add_point(self, point):
-        """그리기 모드일 때 좌표를 버퍼에 추가"""
+        """Adds coordinates to the buffer when in drawing mode"""
         if point != (-1, -1):
             self.current_drawing_pts.append(point)
 
     def process_drawing(self, mode, canvas):
         """
-        현재 드로잉 모드에 따라 도형 인식 및 캔버스 업데이트를 처리
+        Processes shape recognition and canvas updates based on the current drawing mode.
         """
         if self.prev_mode == "draw" and mode in ("move", "none", "erase"):
 
             if len(self.current_drawing_pts) > 10:
-                # 도형 보정 시도 (함수 이름 변경)
+                # Attempt shape correction (function name changed)
                 success = self._recognize_and_draw_shape(canvas)
 
-                # 처리 후 버퍼 초기화
+                # Clear buffer after processing
                 self.current_drawing_pts.clear()
                 self.prev_mode = mode
                 return success
@@ -61,16 +61,16 @@ class ShapeRecognizer:
 
     def _recognize_and_draw_shape(self, canvas):
         """
-        저장된 좌표를 기반으로 닫힌 영역을 찾고 사각형/삼각형/원으로 보정
+        Finds a closed area based on saved coordinates and corrects it to a rectangle/triangle/circle.
         """
 
-        # 1. 드로잉 좌표로 임시 마스크 생성 및 컨투어 찾기 (기존 로직 유지)
+        # 1. Create temporary mask with drawing coordinates and find contours (maintain existing logic)
         pts = np.array(self.current_drawing_pts, dtype=np.int32)
         temp_mask = np.zeros_like(canvas[:, :, 0])
         cv2.polylines(temp_mask, [pts], isClosed=False, color=255, thickness=40)
 
-        # 닫힘(Closing) 연산 적용
-        kernel = np.ones((5, 5), np.uint8)  # 커널 크기는 테스트하며 조정
+        # Apply Closing morphological operation
+        kernel = np.ones((5, 5), np.uint8)  # Adjust kernel size through testing
         temp_mask = cv2.morphologyEx(temp_mask, cv2.MORPH_CLOSE, kernel)
 
         contours, _ = cv2.findContours(
@@ -86,54 +86,54 @@ class ShapeRecognizer:
         if area < self.MIN_CONTOUR_AREA:
             return False
 
-        # 2. 도형 분석 및 인식
+        # 2. Analyze and recognize shape
         shape_type = "unknown"
 
-        # 컨투어의 길이를 계산하고, 이 길이의 APPROX_EPSILON 비율만큼 엡실론을 설정
+        # Calculate the perimeter of the contour and set epsilon as a ratio of the perimeter
         peri = cv2.arcLength(c, True)
         approx = cv2.approxPolyDP(c, self.APPROX_EPSILON * peri, True)
 
         if len(approx) == 3:
-            # 꼭짓점이 3개: 삼각형
+            # 3 vertices: Triangle
             shape_type = "triangle"
             x, y, w, h = cv2.boundingRect(approx)
 
         elif len(approx) == 4 and cv2.isContourConvex(approx):
-            # 꼭짓점이 4개: 사각형 (기존 로직)
+            # 4 vertices: Rectangle (existing logic)
             shape_type = "rectangle"
             x, y, w, h = cv2.boundingRect(approx)
 
         else:
-            # 4개보다 많은 꼭짓점: 원 또는 다른 복잡한 도형
-            # 원 인식 시도
-            x, y, w, h = cv2.boundingRect(c)  # 원본 컨투어의 바운딩 박스
+            # More than 4 vertices: Circle or other complex shape
+            # Attempt circle recognition
+            x, y, w, h = cv2.boundingRect(c)  # Bounding box of the original contour
 
             if w > 0 and h > 0:
                 bounding_box_area = w * h
-                # 컨투어 면적 / 바운딩 사각형 면적 비율로 원형 판단
+                # Judge circularity by the ratio of contour area to bounding box area
                 area_ratio = area / bounding_box_area
 
-                # 가로세로 비율이 1에 가깝고 면적 비율이 높으면 원으로 판단
+                # If aspect ratio is close to 1 and area ratio is high, it's a circle
                 aspect_ratio = w / h
 
                 if (
                     area_ratio >= self.CIRCLE_MATCH_THRESHOLD
-                    and 0.7 <= aspect_ratio <= 1.3  # 필요시 값 수정(원 인식범위)
+                    and 0.7 <= aspect_ratio <= 1.3  # Adjust value if needed (circle recognition range)
                 ):
                     shape_type = "circle"
-                    # 원의 중심과 반지름 계산
+                    # Calculate center and radius of the circle
                     ((cx, cy), radius) = cv2.minEnclosingCircle(c)
                     center = (int(cx), int(cy))
                     radius = int(radius)
 
-        # 3. 보정된 도형 그리기 (지우기 포함)
+        # 3. Draw corrected shape (including erasing)
         if shape_type != "unknown":
 
             pts = np.array(self.current_drawing_pts, dtype=np.int32)
 
             if len(pts) > 1:
-                # 궤적을 따라 검은색 선을 다시 그려서 지웁니다.
-                # 두께를 그렸던 두께보다 조금 더 크게 설정하여 확실히 지웁니다.
+                # Erase by redrawing the path with a black line.
+                # Set thickness slightly larger than the drawing thickness to ensure it's fully erased.
                 erase_thickness = self.draw_thickness + 10
 
                 for i in range(1, len(pts)):
@@ -143,17 +143,17 @@ class ShapeRecognizer:
                         canvas,
                         pt1,
                         pt2,
-                        self.erase_color,  # 검은색
+                        self.erase_color,  # Black
                         erase_thickness,
                     )
 
-            # 2) 보정된 도형 그리기
+            # 2) Draw corrected shape
             if shape_type == "circle":
-                # 보정된 원 그리기
+                # Draw corrected circle
                 cv2.circle(canvas, center, radius, self.draw_color, self.draw_thickness)
 
             elif shape_type in ("rectangle", "triangle"):
-                # 보정된 사각형 또는 삼각형 외곽선 그리기 (approx 사용)
+                # Draw corrected rectangle or triangle outline (using approx)
                 cv2.polylines(
                     canvas,
                     [approx],
@@ -162,7 +162,7 @@ class ShapeRecognizer:
                     thickness=self.draw_thickness,
                 )
 
-            print(f"도형 인식 및 보정 완료: {shape_type}")
+            print(f"Shape recognized and corrected: {shape_type}")
             return True
 
         return False
