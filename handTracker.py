@@ -7,10 +7,10 @@ from collections import deque
 
 class HandTracker:
     """
-    손가락을 감지해서 현재 모드와 좌표를 반환 (신철민 님 파트)
+    손가락을 감지해서 현재 모드와 좌표를 반환 
     """
 
-    def __init__(self, history_len=5, draw_thresh=30, erase_thresh=100):
+    def __init__(self, history_len=5, draw_thresh=30, erase_thresh=150):
         # MediaPipe Hands 초기화
         self.mp_hands = mp.solutions.hands
         self.hands = self.mp_hands.Hands(

@@ -11,6 +11,11 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
     - mode, color, thickness, zoom, page, rec 상태 표시
     - kb_manager.help_on이면 간단한 도움말 패널 표시
     """
+    # HUD ON/OFF 토글
+    # '`' 키로 hud_on이 False가 되면, 아무것도 그리지 않고 원본 반환
+    if not kb_manager.hud_on:
+        return frame_bgr
+    
     img = frame_bgr
     h, w = img.shape[:2]
 
@@ -22,6 +27,9 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
 
     # ===== 녹화 ON/OFF 표기 =====
     rec = "ON" if kb_manager.is_recording else "OFF"   # ← 변경
+    trk = "ON" if kb_manager.drawing_enabled else "OFF"
+    usr = "ON" if kb_manager.user_mask_enabled else "OFF"
+
     mode = blackboard.drawing_mode
     color = kb_manager.pen_color
     thick = kb_manager.thickness
@@ -36,9 +44,9 @@ def draw_hud(frame_bgr, blackboard, kb_manager, extra_msg=None):
         page = 0  # PDF가 꺼졌을 때는 0/1로 표시
 
     # ===== 문자열 폭 측정해 오른쪽 열 x좌표를 동적으로 산정 =====
-    # Row1: "Mode: ..." | "REC: ..."
+    # Row1: "Mode: ..." | "REC: ... | TRK: ... | USR: ..."
     row1_left  = f"Mode: {mode}"
-    row1_right = f"REC: {rec}"
+    row1_right = f"REC: {rec}    TRK: {trk}   USR: {usr}"
     (left_w1, _), _ = cv2.getTextSize(row1_left, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
     gap = 20  # 좌/우 열 간격
     x_left = 30

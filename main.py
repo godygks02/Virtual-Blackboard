@@ -14,7 +14,6 @@ from overlay_hud import draw_hud
 
 from view_manager import ViewManager
 
-
 class VirtualBlackboard:
     """
     모든 레이어(배경, 드로잉, 사용자) 관리 및 합성
@@ -36,7 +35,7 @@ class VirtualBlackboard:
         )  # 검은색 캔버스
 
         # 클래스 초기화
-        self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=80)
+        self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=150)
         self.bg_module = BackgroundModule()  # ★ cvzone 모듈 로드
         self.bg_manager = BackgroundManager(self.width, self.height)
 
@@ -75,36 +74,55 @@ class VirtualBlackboard:
         self.background_path = source
         self.bg_manager.add_background(source=source, color=color)
 
-    def update(self, frame):
+    def update(self, frame, drawing_enabled, user_mask_enabled):
         """
         매 프레임마다 호출되는 메인 업데이트 함수
         """
         # 현재 page_index와 캔버스 동기화
         self._sync_canvas_with_page()
 
-        # (손) - 원본 고해상도 프레임으로 처리
-        gesture_mode, point, debug_frame = self.hand_tracker.get_gesture(frame)
-
-        # (드로잉) - 원본 해상도 캔버스에 그림
-        self.update_canvas(gesture_mode, point)
-
+        # (손) - [수정] drawing_enabled 플래그에 따라 조건부 실행
+        if drawing_enabled:
+            gesture_mode, point, debug_frame = self.hand_tracker.get_gesture(frame)
+            # (드로잉) - 원본 해상도 캔버스에 그림
+            self.update_canvas(gesture_mode, point)
+        else:
+            # 손 추적 OFF: 강제로 'move' 모드를 주입하여 선이 끊어지게 함
+            self.update_canvas('move', (-1, -1))
+        
         # 사용자 마스크 생성
         # 성능을 위해 640p로 축소하여 AI 처리
-        frame_small = cv2.resize(frame, (self.PROC_WIDTH, self.PROC_HEIGHT))
+        # 사용자 마스크 생성 - [수정] user_mask_enabled 플래그에 따라 조건부 실행
+        if user_mask_enabled:
+            # 성능을 위해 640p로 축소하여 AI 처리
+            frame_small = cv2.resize(frame, (self.PROC_WIDTH, self.PROC_HEIGHT))
 
-        # AI가 640p 마스크 생성
-        user_mask_small = self.bg_module.create_layer3_mask(frame_small, threshold=0.62)
+            # AI가 640p 마스크 생성
+            user_mask_small = self.bg_module.create_layer3_mask(frame_small, threshold=0.62)
 
-        # 마스크를 원본 해상도(1280x720)로 다시 확대  +  형태 보장
-        user_mask = cv2.resize(
-            user_mask_small, (self.width, self.height), interpolation=cv2.INTER_NEAREST
-        )
-        if user_mask.ndim == 3:  # 혹시 3채널로 들어오면 단일채널로
-            user_mask = cv2.cvtColor(user_mask, cv2.COLOR_BGR2GRAY)
-        user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
-
+            # 마스크를 원본 해상도(1280x720)로 다시 확대  +  형태 보장
+            user_mask = cv2.resize(
+                user_mask_small, (self.width, self.height), interpolation=cv2.INTER_NEAREST
+            )
+            if user_mask.ndim == 3:  # 혹시 3채널로 들어오면 단일채널로
+                user_mask = cv2.cvtColor(user_mask, cv2.COLOR_BGR2GRAY)
+            user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
+        
+        else:
+            # [신규] 사용자 마스크 OFF: 0으로 채워진 빈 마스크 생성
+            # render() 함수는 이 빈 마스크를 받아 (배경+그림)만 표시하게 됩니다.
+            user_mask = np.zeros((self.height, self.width), dtype=np.uint8)
+        
         # 최종 렌더링 (3-Layer 합성)
         output_frame = self.render(frame, self.canvas, user_mask)
+        if drawing_enabled:
+            # 손가락 포인터 (디버깅)
+            debug_color = (255,0,255)
+            if(gesture_mode == "erase"): 
+                debug_color = (255,255,0)
+            elif(gesture_mode == "move"):
+                debug_color = (0,255,255)
+            cv2.circle(output_frame, point, 12, debug_color, cv2.FILLED)
 
         return output_frame
 
@@ -166,35 +184,48 @@ class VirtualBlackboard:
 
     def render(self, frame, canvas, user_mask):
         """
-        3-Layer 합성 로직 (검은색 캔버스 기준)
-        순서: (1.배경 + 2.드로잉) -> 3.사용자
+        3-Layer 합성 로직 (수정: 그림이 최상위 3-Layer가 됨)
+        순서: (1.배경 -> 2.사용자) -> 3.드로잉
         """
         # bitwise 사용 전 안전장치
         user_mask = np.ascontiguousarray(user_mask, dtype=np.uint8)
 
-        # (Layer 1 + Layer 2)
-        # 검은색 배경(Layer 1)과 검은색 캔버스(Layer 2)를 합침
-        # (배경이 0, 캔버스도 0이므로 add 연산으로 그림만 합쳐짐)
+        # (Layer 1) 배경 가져오기
+        # PDF/이미지가 있으면 "줌/패닝"된 뷰를, 없으면 "단색 검은색" 뷰를 가져옴
         bg_view = (
             self.bg_manager.get_view()
             if self.background_path is not None
-            else self.canvas
+            else self.background # ★수정: self.canvas 대신 self.background가 맞습니다.
         )
-        combined_bg = cv2.add(bg_view, canvas)
 
-        # (Layer 3)
-        # 원본 프레임에서 사용자 부분만 오려내기
+        # (Layer 2) 원본 프레임(frame)에서 사용자 부분(user_part)만 오려내기
         user_part = cv2.bitwise_and(frame, frame, mask=user_mask)
 
-        # (칠판+그림)에서 사용자 아닌 배경 부분만 오려내기
+        # (Layer 1) 배경(bg_view)에서 사용자 영역을 제외한 배경 부분만 오려내기
         bg_mask = cv2.bitwise_not(user_mask)
-        final_bg_part = cv2.bitwise_and(combined_bg, combined_bg, mask=bg_mask)
+        final_bg_part = cv2.bitwise_and(bg_view, bg_view, mask=bg_mask)
 
-        # (칠판+그림 배경) + (사람)
-        output = cv2.add(final_bg_part, user_part)
+        # (Layer 1 + Layer 2) 합성
+        # (배경 부분) + (사람 부분)
+        bg_with_user = cv2.add(final_bg_part, user_part)
 
-        # PIP용 레이어 저장
-        self.last_combined_bg = combined_bg.copy()
+        # (Layer 3) 드로잉 캔버스
+        # self.canvas는 배경이 0(검은색)이고 그림(흰색 등)만 색상 값을 가집니다.
+        
+        # (최종 합성) (Layer 1+2) + (Layer 3)
+        # (배경+사람) + (드로잉 캔버스)
+        # 캔버스의 검은색(0) 영역은 (배경+사람)에 영향을 주지 않고,
+        # 캔버스의 그림(>0) 영역은 (배경+사람) 위에 덧그려집니다.
+        output = cv2.add(bg_with_user, canvas)
+
+
+        # --- PIP용 레이어 저장 (ViewManager가 사용할 수 있도록) ---
+        # ViewManager(z키)는 '배경+그림'과 '원본캠'을 따로 필요로 할 수 있으므로
+        # 기존 로직을 유지하여 저장합니다.
+        
+        # 1. (배경+그림) 레이어 생성 (기존 로직)
+        self.last_combined_bg = cv2.add(bg_view, canvas)
+        # 2. (원본캠) 레이어 저장
         self.last_frame = frame.copy()
 
         return output
@@ -286,9 +317,13 @@ def main():
         # 프레임을 블랙보드 해상도에 강제 맞춤 (크기 불일치 방지)
         frame = cv2.resize(frame, (blackboard.width, blackboard.height))
 
-        # 메인 업데이트 함수 호출 (가상 칠판 3-Layer 합성)
-        output_image = blackboard.update(frame)
+        # 키보드 매니저(kb)에서 현재 토글 상태 가져옴
+        draw_flag = kb.drawing_enabled
+        mask_flag = kb.user_mask_enabled
 
+        # 메인 업데이트 함수 호출 (가상 칠판 3-Layer 합성)
+        # 읽어온 플래그를 update 함수에 전달
+        output_image = blackboard.update(frame, draw_flag, mask_flag)
         # HUD + 보기 모드
         display_image = view.compose(output_image, blackboard, kb)
 
@@ -361,12 +396,6 @@ def main():
     blackboard.close()
     cap.release()
     cv2.destroyAllWindows()
-
-    # 리소스 해제
-    blackboard.close()
-    cap.release()
-    cv2.destroyAllWindows()
-
 
 if __name__ == "__main__":
     main()
