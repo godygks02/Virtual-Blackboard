@@ -4,24 +4,24 @@ An interactive, gesture-based virtual blackboard project using OpenCV and MediaP
 
 ##  Features
 
-- ** Real-time Hand Gesture Recognition**:
+- **Real-time Hand Gesture Recognition**:
   - **Mode Switching**: Automatically switches between 'Draw', 'Erase', and 'Cursor Move' modes based on your finger gestures.
   - **Coordinate Smoothing**: Applies a moving average filter for smoother cursor movement.
 
-- ** Advanced Drawing Functions**:
+- **Advanced Drawing Functions**:
   - **Shape Correction**: Recognizes hand-drawn shapes (circles, rectangles, triangles) and automatically corrects them into neat figures.
   - **Versatile Pen Settings**: Easily change color and thickness with hotkeys and supports presets.
 
-- ** Dynamic Background Management**:
+- **Dynamic Background Management**:
   - **Multiple Format Support**: Set solid colors, images (JPG, PNG), or multi-page PDF files as your background.
   - **Background Control**: Freely zoom in/out and pan the background using your mouse wheel and drag.
   - **Page Navigation**: Turn pages of a PDF background using the keyboard.
 
-- ** User Segmentation (Background Removal)**:
+- **User Segmentation (Background Removal)**:
   - Utilizes MediaPipe Selfie Segmentation to separate the user (foreground) from the background in real-time.
   - The user appears to be 'in front of' the blackboard, preventing drawings from overlapping with the user.
 
-- ** Convenience Features**:
+- **Convenience Features**:
   - **Multiple View Modes**: Supports a normal mode and a PIP (Picture-in-Picture) mode that displays the presenter's face in a small window at the bottom right.
   - **Status HUD**: A Heads-Up Display shows the current pen settings, mode, page information, and more.
   - **Recording and Snapshots**: Record the current screen as a video (MP4) or capture it as an image (PNG).
