@@ -4,7 +4,7 @@ import mediapipe as mp
 from cvzone.SelfiSegmentationModule import SelfiSegmentation
 
 
-class BackgroundModule:
+class UserMaskManager:
     """
     (Layer 1) Background Creation + (Layer 3) User Segmentation with cvzone(MediaPipe)
     Controls MediaPipe more easily using the cvzone library.
@@ -49,4 +49,4 @@ class BackgroundModule:
         """Release resources"""
         if hasattr(self.segmentor, "selfieSegmentation"):
             self.segmentor.selfieSegmentation.close()
-        print("BackgroundModule(cvzone) resources released.")
+        print("UserMaskManager(cvzone) resources released.")

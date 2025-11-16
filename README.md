@@ -132,7 +132,7 @@ This project composites three virtual layers in real-time to create the final ou
 - **`BackGroundManager.py`**:
   - Manages the background layer. It renders PDFs page by page via `PyMuPDF`, loads image files, and handles zoom/pan states.
 
-- **`BackGroundModule.py`**:
+- **`UserMaskManager.py`**:
   - Runs the `MediaPipe Selfie Segmentation` model via the `cvzone` library.
   - Creates a mask that segments only the user area from the webcam frame.
 

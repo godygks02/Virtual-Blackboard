@@ -1,12 +1,10 @@
 import cv2
 import numpy as np
 from handTracker import HandTracker
-from BackGroundModule import BackgroundModule
-from BackGroundManager import BackgroundManager
+from UserMaskManager import UserMaskManager
+from BackgroundManager import BackgroundManager
 
 from utils import file_select_dialog
-from handTracker import HandTracker
-from BackGroundModule import BackgroundModule
 from shape_Recog import ShapeRecognizer
 
 from keyboard_input import KeyboardInputManager
@@ -37,7 +35,7 @@ class VirtualBlackboard:
 
         # Class initialization
         self.hand_tracker = HandTracker(draw_thresh=30, erase_thresh=120)
-        self.bg_module = BackgroundModule()  # ★ Load cvzone module
+        self.bg_module = UserMaskManager()  # ★ Load cvzone module
         self.bg_manager = BackgroundManager(self.width, self.height)
 
         # Add shape recognition module
@@ -114,17 +112,7 @@ class VirtualBlackboard:
         # Final rendering
         output_frame = self.render(frame, self.canvas, user_mask)
         
-        # [MODIFIED] Move debugging code inside 'if drawing_enabled:' block to prevent 't' key error
-        if drawing_enabled:
-            # Finger pointer (debugging)
-            debug_color = (255, 0, 255) # Draw (Magenta)
-            if(gesture_mode == "erase"):
-                debug_color = (255, 255, 0) # Erase (Cyan)
-            elif(gesture_mode == "move"):
-                debug_color = (0, 255, 255) # Move (Yellow)
-            cv2.circle(output_frame, point, 12, debug_color, cv2.FILLED)
-
-        return output_frame
+        return output_frame, gesture_mode, point
 
     def update_canvas(self, mode, point):
         """
@@ -285,7 +273,10 @@ def main():
     view = ViewManager()
 
     window_name = "Virtual Blackboard (cvzone DNN)"
-    cv2.namedWindow(window_name)
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL) 
+    
+    # start full screen
+    # cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback(window_name, blackboard.bg_manager.on_mouse)
 
     while True:
@@ -306,9 +297,18 @@ def main():
 
         # Call the main update function (Virtual Blackboard 3-Layer composite)
         # Pass the read flags to the update function
-        output_image = blackboard.update(frame, draw_flag, mask_flag)
+        output_image, gesture_mode, point = blackboard.update(frame, draw_flag, mask_flag)
         # HUD + View mode
         display_image = view.compose(output_image, blackboard, kb)
+
+        if draw_flag:
+            # Finger pointer (debugging)
+            debug_color = (255, 0, 255) # Draw (Magenta)
+            if(gesture_mode == "erase"):
+                debug_color = (255, 255, 0) # Erase (Cyan)
+            elif(gesture_mode == "move"):
+                debug_color = (0, 255, 255) # Move (Yellow)
+            cv2.circle(display_image, point, 12, debug_color, cv2.FILLED)
 
         # Display output
         cv2.imshow(window_name, display_image)
