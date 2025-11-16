@@ -1,7 +1,7 @@
 # view_manager.py
 import cv2
 import numpy as np
-from overlay_hud import draw_hud
+from .overlay_hud import draw_hud
 
 
 class ViewManager:

@@ -1,16 +1,16 @@
 import cv2
 import numpy as np
-from handTracker import HandTracker
-from UserMaskManager import UserMaskManager
-from BackgroundManager import BackgroundManager
+from module.handTracker import HandTracker
+from module.UserMaskManager import UserMaskManager
+from module.BackgroundManager import BackgroundManager
 
-from utils import file_select_dialog
-from shape_Recog import ShapeRecognizer
+from module.utils import file_select_dialog
+from module.shape_Recog import ShapeRecognizer
 
-from keyboard_input import KeyboardInputManager
-from overlay_hud import draw_hud
+from module.keyboard_input import KeyboardInputManager
+from module.overlay_hud import draw_hud
 
-from view_manager import ViewManager
+from module.view_manager import ViewManager
 
 class VirtualBlackboard:
     """
@@ -273,8 +273,7 @@ def main():
     view = ViewManager()
 
     window_name = "Virtual Blackboard (cvzone DNN)"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL) 
-    
+    cv2.namedWindow(window_name) 
     # start full screen
     # cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
     cv2.setMouseCallback(window_name, blackboard.bg_manager.on_mouse)
